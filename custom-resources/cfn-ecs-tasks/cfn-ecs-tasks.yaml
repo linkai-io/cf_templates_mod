@@ -1,0 +1,83 @@
+Description: >
+    Deploys the custom resource to allow templates to run ecs tasks.
+
+Resources:
+  # Define the ecs task runner so we can automate migration of the DB
+  EcsTaskRunnerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: '/aws/lambda/cfn-ecs-tasks'
+      RetentionInDays: 3
+
+  EcsTaskRunner:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - EcsTaskRunnerLogGroup
+    Properties:
+      Description: ECS Task Runner
+      Handler: ecs_tasks.handler
+      MemorySize: 128
+      Runtime: python2.7
+      Timeout: 300
+      Role: !Sub ${EcsTaskRunnerRole.Arn}
+      FunctionName: cfn-ecs-tasks
+      Code:
+        S3Bucket: linkai-infra
+        S3Key: lambdas/ecsTasks.zip
+  
+  EcsTaskRunnerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      Policies:
+      - PolicyName: EcsTaskRunner-Permissions
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Sid: ECSTaskCheckStackStatus
+            Effect: Allow
+            Action:
+              - cloudformation:DescribeStacks
+            Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/${AWS::StackId}
+          - Sid: ECSTaskInvokeSelf
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cfn-ecs-tasks'
+          - Sid: ECSTaskDefinition
+            Effect: Allow
+            Action:
+              - ecs:DescribeTaskDefinition
+            Resource: "*"
+          - Sid: EcsTasks
+            Effect: Allow
+            Action:
+              - ecs:DescribeTasks
+              - ecs:ListTasks
+              - ecs:RunTask
+              - ecs:StartTask
+              - ecs:StopTask
+              - ecs:DescribeContainerInstances
+              - ecs:ListContainerInstances
+            Resource: "*"
+          - Sid: ManageLambdaLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:PutRetentionPolicy
+              - logs:PutSubscriptionFilter
+              - logs:DescribeLogStreams
+              - logs:DeleteLogGroup
+              - logs:DeleteRetentionPolicy
+              - logs:DeleteSubscriptionFilter
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/cfn-ecs-tasks:*:*'

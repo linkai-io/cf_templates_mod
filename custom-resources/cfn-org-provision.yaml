@@ -1,0 +1,113 @@
+Description: >
+    Deploys the custom resource to provision support organization.
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Type: String
+  S3BucketPrefix:
+    Type: String
+    Default: 'linkai-infra'
+
+Resources:
+  OrgProvisionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Allows org provisioner to access backend services'
+      GroupName: !Sub '${EnvironmentName}-orgprovision-handler-egress-sg'
+      VpcId:
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name 
+          Value: !Sub '${EnvironmentName}-orgprovision-handler-egress-sg'
+        - Key: purpose
+          Value: allow org provisioner custom resource access to services and SSM
+
+  OrgProvisionRunner:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: !Sub '${EnvironmentName} Organization Provisioner Custom Resource'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/cr/supportprovision_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-cfn-org-provision'
+      Handler: main
+      MemorySize: 128
+      Timeout: 300
+      Role: !GetAtt 'OrgProvisionRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref OrgProvisionSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+  
+  OrgProvisionPolicy:
+    Type: AWS::IAM::Policy
+    DependsOn:
+      - OrgProvisionRole
+    Properties:
+      PolicyName: SupportOrgProvisionPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - "iam:GetRole"
+              - "iam:PassRole"
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/hakken-${EnvironmentName}-frontend*"
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/loadbalancer/config"
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/system/*"
+          - Effect: Allow
+            Action:
+              - "cognito-identity:*"
+              - "cognito-idp:*"
+              - "cognito-sync:*"
+              - "iam:ListRoles"
+              - "iam:ListOpenIdConnectProviders"
+              - "sns:ListPlatformApplications"
+            Resource:
+              - '*'
+          - Action:
+              - logs:*
+            Resource: arn:aws:logs:*:*:*
+            Effect: Allow
+      Roles:
+        - !Ref 'OrgProvisionRole'
+
+  OrgProvisionRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: 
+            - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: 
+              - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      
