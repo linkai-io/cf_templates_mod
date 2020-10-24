@@ -1,0 +1,391 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template deploys the Unbound dns resolver for the AM services.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Type: String
+  UnboundInstanceType:
+    Description: Unbound EC2 instance type
+    Type: String
+    Default: t2.medium
+    AllowedValues:
+      - t1.micro
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t2.large
+      - m1.small
+      - m1.medium
+      - m1.large
+      - m1.xlarge
+      - m2.xlarge
+      - m2.2xlarge
+      - m2.4xlarge
+      - m3.medium
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m4.10xlarge
+      - c1.medium
+      - c1.xlarge
+      - c3.large
+      - c3.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - g2.2xlarge
+      - g2.8xlarge
+      - r3.large
+      - r3.xlarge
+      - r3.2xlarge
+      - r3.4xlarge
+      - r3.8xlarge
+      - i2.xlarge
+      - i2.2xlarge
+      - i2.4xlarge
+      - i2.8xlarge
+      - d2.xlarge
+      - d2.2xlarge
+      - d2.4xlarge
+      - d2.8xlarge
+      - hi1.4xlarge
+      - hs1.8xlarge
+      - cr1.8xlarge
+      - cc2.8xlarge
+      - cg1.4xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+
+Resources:
+  # Key & Security Related
+  UnboundServerPrivateKey:
+    Type: Custom::RSAKey
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/unbound/key'
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  UnboundServerKeyPair:
+    Type: Custom::KeyPair
+    DependsOn: UnboundServerPrivateKey
+    Properties:
+      Name: !Sub ${EnvironmentName}-UnboundServerKeyPair
+      PublicKeyMaterial: !GetAtt 'UnboundServerPrivateKey.PublicKey'
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  UnboundSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-unbound-server-sg"
+      GroupDescription: Allow access to Unbound server
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 
+          Fn::ImportValue: 
+            !Sub "${EnvironmentName}-VPCCIDR"
+      - IpProtocol: tcp
+        FromPort: 53
+        ToPort: 53
+        CidrIp: 
+          Fn::ImportValue: 
+            !Sub "${EnvironmentName}-VPCCIDR"
+      - IpProtocol: udp
+        FromPort: 53
+        ToPort: 53
+        CidrIp: 
+          Fn::ImportValue: 
+            !Sub "${EnvironmentName}-VPCCIDR"
+      Tags:
+        - Key: purpose
+          Value: allow access to Unbound server
+
+  # Unbound Instance
+  UnboundEC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: [UnboundServerKeyPair, UnboundSecurityGroup]
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT45M
+        Count: '1'
+    Properties:
+      InstanceType: !Ref 'UnboundInstanceType'
+      KeyName: !Sub ${EnvironmentName}-UnboundServerKeyPair
+      ImageId: ami-0565af6e282977273
+      Monitoring: false
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet: 
+            - Ref: "UnboundSecurityGroup"
+            - Fn::ImportValue:
+                !Sub ${EnvironmentName}-RemoteWorkersSG
+          SubnetId: 
+            Fn::ImportValue: 
+              !Sub '${EnvironmentName}-PublicSubnet1'
+      UserData: !Base64
+        Fn::Join:
+          - ''
+          - - "#!/bin/bash -xe\n"
+            - "apt-get update -y\n"
+            - "apt-get install -y build-essential libevent-dev ca-certificates libidn2-0-dev libssl-dev libexpat1-dev make python-setuptools\n" 
+            - "wget https://www.openssl.org/source/openssl-1.1.1.tar.gz\n"
+            - "echo '2836875a0f89c03d0fdf483941512613a50cfb421d6fd94b9f41d7279d586a3d ./openssl-1.1.1.tar.gz' | sha256sum -c\n"
+            - "tar -zxvf openssl-1.1.1.tar.gz\n"
+            - "cd openssl-*\n"
+            - "./config --prefix=/opt/openssl no-weak-ssl-ciphers no-ssl3 no-shared enable-ec_nistp_64_gcc_128 -DOPENSSL_NO_HEARTBEATS -fstack-protector-strong\n"
+            - "make depend && make && make install_sw\n"
+            - "cd ..\n"
+            - "wget https://unbound.net/downloads/unbound-latest.tar.gz\n"
+            - "tar -zxvf unbound-latest.tar.gz\n"
+            - "cd unbound-*\n"
+            - "groupadd _unbound\n"
+            - "useradd -g _unbound -s /etc -d /dev/null _unbound\n"
+            - "./configure --prefix=/opt/unbound --with-pthreads --with-username=_unbound --with-ssl=/opt/openssl --with-libevent --enable-event-api\n" 
+            - "make install\n" 
+            - "chown -R _unbound:_unbound /opt/unbound/\n"
+            
+            - "mkdir -p /opt/aws/bin\n"
+            - "wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n"
+            - "easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-latest.tar.gz\n"
+            - '/opt/aws/bin/cfn-init -v '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource UnboundEC2Instance '
+            - '         --configsets full_install '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - "\n"
+            - "chown -R _unbound:_unbound /opt/unbound_conf.sh\n"
+            - "systemctl enable unbound.service\n"
+            - "systemctl start unbound.service\n"
+            - '/opt/aws/bin/cfn-signal -e $? '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource UnboundEC2Instance '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - "\n"
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          full_install:
+            - install_and_enable_cfn_hup
+            - set_app_environment
+        install_and_enable_cfn_hup:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Join
+                - ''
+                - - "[main]\n"
+                  - stack=
+                  - !Ref 'AWS::StackId'
+                  - "\n"
+                  - region=
+                  - !Ref 'AWS::Region'
+                  - "\n"
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Join
+                - ''
+                - - "[cfn-auto-reloader-hook]\n"
+                  - "triggers=post.update\n"
+                  - "path=Resources.UnboundEC2Instance.Metadata.AWS::CloudFormation::Init\n"
+                  - 'action=/opt/aws/bin/cfn-init -v '
+                  - '         --stack '
+                  - !Ref 'AWS::StackName'
+                  - '         --resource UnboundEC2Instance '
+                  - '         --configsets full_install '
+                  - '         --region '
+                  - !Ref 'AWS::Region'
+                  - "\n"
+                  - "runas=root\n"
+            /lib/systemd/system/cfn-hup.service:
+              content: !Join
+                - ''
+                - - "[Unit]\n"
+                  - "Description=cfn-hup daemon\n\n"
+                  - "[Service]\n"
+                  - "Type=simple\n"
+                  - "ExecStart=/opt/aws/bin/cfn-hup\n"
+                  - "Restart=always\n\n"
+                  - "[Install]\n"
+                  - WantedBy=multi-user.target
+          commands:
+            '01enable_cfn_hup':
+              command: systemctl enable cfn-hup.service
+            '02start_cfn_hup':
+              command: systemctl start cfn-hup.service
+        set_app_environment:
+          files:
+            /lib/systemd/system/unbound.service:
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              content: !Join
+                - ''
+                - - "[Unit]\n"
+                  - "Description = Recursive DNS server\n"
+                  - "After=network.target\n"
+                  - "\n"
+                  - "[Service]\n"
+                  - "AmbientCapabilities=CAP_NET_BIND_SERVICE\n"
+                  - "PermissionsStartOnly=true\n"
+                  - "LimitNOFILE=65536\n"
+                  - "WorkingDirectory=/opt/unbound/\n"
+                  - "ExecStartPre = /opt/unbound_conf.sh\n"
+                  - "ExecStartPre = /opt/unbound/sbin/unbound-anchor -a /opt/unbound/etc/unbound/var/root.key\n"
+                  - "ExecStart = /opt/unbound/sbin/unbound -d -c /opt/unbound/etc/unbound/unbound.conf\n"
+                  - "ExecReload = /bin/kill -HUP $MAINPID\n"
+                  - "Restart = always\n"
+                  - "RestartSec = 360\n"
+                  - "\n"
+                  - "[Install]\n"
+                  - "WantedBy = multi-user.target\n"
+            /opt/unbound_conf.sh:
+              mode: "000744"
+              owner: "root"
+              group: "root"
+              content: !Join 
+                - ''
+                - - "#!/bin/sh\n\n"
+                  - "mkdir -p /opt/unbound/etc/unbound/dev && cp -a /dev/random /dev/urandom /opt/unbound/etc/unbound/dev/\n"
+                  - "mkdir -p -m 700 /opt/unbound/etc/unbound/var\n"
+                  - "chown _unbound:_unbound /opt/unbound/etc/unbound/var\n"
+                  - "/opt/unbound/sbin/unbound-anchor -a /opt/unbound/etc/unbound/var/root.key\n"
+                  - "reserved=12582912\n"
+                  - "availableMemory=$((1024 * $( (fgrep MemAvailable /proc/meminfo || fgrep MemTotal /proc/meminfo) | sed 's/[^0-9]//g' ) ))\n"
+                  - "if [ $availableMemory -le $(($reserved * 2)) ]; then\n"
+                  - "    echo 'Not enough memory' >&2\n"
+                  - "    exit 1\n"
+                  - "fi\n"
+                  - "availableMemory=$(($availableMemory - $reserved))\n"
+                  - "msg_cache_size=$(($availableMemory / 3))\n"
+                  - "rr_cache_size=$(($availableMemory / 3))\n"
+                  - "nproc=$(nproc)\n"
+                  - "if [ $nproc -gt 1 ]; then\n"
+                  - "    threads=$(($nproc - 1))\n"
+                  - "else\n"
+                  - "    threads=1\n"
+                  - "fi\n"
+                  - "\n"
+                  - "sed -e \"s/@MSG_CACHE_SIZE@/${msg_cache_size}/\" -e \"s/@RR_CACHE_SIZE@/${rr_cache_size}/\" -e \"s/@THREADS@/${threads}/\" > /opt/unbound/etc/unbound/unbound.conf << EOT\n"
+                  - "server:\n"
+                  - "    #verbosity: 1\n"
+                  - "    num-threads: @THREADS@\n"
+                  - "    interface: 0.0.0.0@53\n"
+                  - "    so-reuseport: yes\n"
+                  - "    edns-buffer-size: 1472\n"
+                  - "    delay-close: 10000\n"
+                  - "    cache-min-ttl: 60\n"
+                  - "    cache-max-ttl: 86400\n"
+                  - "    do-daemonize: no\n"
+                  - "    username: \"_unbound\"\n"
+                  - "    log-queries: no \n"
+                  - "    hide-version: yes\n"
+                  - "    hide-identity: yes\n"
+                  - "    identity: \"DNS\"\n"
+                  - "    harden-algo-downgrade: yes\n"
+                  - "    harden-short-bufsize: yes\n"
+                  - "    harden-large-queries: yes\n"
+                  - "    harden-glue: yes\n"
+                  - "    harden-dnssec-stripped: yes\n"
+                  - "    harden-below-nxdomain: yes\n"
+                  - "    harden-referral-path: no\n"
+                  - "    do-not-query-localhost: no\n"
+                  - "    prefetch: yes\n"
+                  - "    prefetch-key: yes\n"
+                  - "    qname-minimisation: yes\n"
+                  - "    aggressive-nsec: yes\n"
+                  - "    ratelimit: 10000\n"
+                  - "    rrset-roundrobin: yes\n"
+                  - "    minimal-responses: yes\n"
+                  - "    chroot: \"/opt/unbound/etc/unbound\""
+                  - "    directory: \"/opt/unbound/etc/unbound\"\n"
+                  - "    auto-trust-anchor-file: \"var/root.key\"\n"
+                  - "    num-queries-per-thread: 4096\n"
+                  - "    outgoing-range: 8192\n"
+                  - "    msg-cache-size: @MSG_CACHE_SIZE@\n"
+                  - "    rrset-cache-size: @RR_CACHE_SIZE@\n"
+                  - "    neg-cache-size: 4M\n"
+                  - "    serve-expired: yes\n"
+                  - "    use-caps-for-id: yes\n"
+                  - "    access-control: 127.0.0.1/32 allow\n"
+                  - "    access-control: "
+                  - Fn::ImportValue: 
+                      !Sub "${EnvironmentName}-VPCCIDR"
+                  - " allow\n"
+                  - "    forward-zone:\n"
+                  - "    name: \".\"\n"
+                  - "    forward-addr: 1.1.1.1@853\n"
+                  - "    forward-addr: 1.0.0.1@853\n"
+                  - "    forward-addr: 64.6.64.6@53\n"
+                  - "    forward-addr: 77.88.8.8@53\n"
+                  - "    forward-addr: 74.82.42.42@53\n"
+                  - "    forward-addr: 8.8.4.4@53\n"
+                  - "    forward-addr: 8.8.8.8@53\n"
+                  - "    #forward-addr: 2606:4700:4700::1111@853\n"
+                  - "    #forward-addr: 2606:4700:4700::1001@853\n"
+                  - "    #forward-tls-upstream: yes\n"
+                  - "\n"
+                  - "remote-control:\n"
+                  - "    control-enable: no\n"
+                  - "EOT\n"
+
+            /etc/app-environment:
+              content: !Join
+                - ''
+                - - "APP_REGION="
+                  - !Ref 'AWS::Region'
+                  - "\n"
+                  - !Sub "APP_ENV=${EnvironmentName}"
+                  - "\n"
+    
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-UnboundServer"
+
+  UnboundServerIPParameter:
+    Type: Custom::Secret
+    DependsOn: UnboundEC2Instance
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/dnsaddresses'
+      KeyAlias: alias/aws/ssm
+      Content: !Join
+        - ''
+        - - !GetAtt UnboundEC2Instance.PrivateIp
+          - ':53'
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+
+Outputs:
+  UnboundServerIP:
+    Description: A reference to the Unbound server for service discovery
+    Value: !GetAtt UnboundEC2Instance.PrivateIp
+    Export: 
+      Name: !Sub ${EnvironmentName}-UnboundServerIP
+
+  UnboundServerDNS:
+    Description: A reference to the Unbound server dns for service discovery
+    Value: !GetAtt UnboundEC2Instance.PrivateDnsName
+    Export: 
+      Name: !Sub ${EnvironmentName}-UnboundServerDNS

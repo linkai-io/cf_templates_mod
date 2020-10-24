@@ -1,0 +1,907 @@
+Description: >
+    This template deploys the necessary tasks and an ecs task runner to automatically
+    deploy and migrate the database templates for all backend services
+  
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+      - dev
+      - qa
+      - prod
+    Type: String
+  
+  EmailRegion:
+    Type: String
+    Default: us-east-1
+  
+  TLDHostedZone:
+    Type: String
+    Default: Z1MC2U93SR0MJ7
+
+Conditions:
+  IsProduction:
+    !Equals [!Ref EnvironmentName, prod]
+
+Resources:
+  IDawsonDBPassword:
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/idawson/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  LinkaiAdminDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/linkai_admin/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  LinkaiDBConnectionString:
+    DependsOn: [LinkaiAdminDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/linkai_admin/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=linkai_admin port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt LinkaiAdminDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+
+  BigDataServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/bigdataservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+
+  BigDataServiceDBConnectionString:
+    DependsOn: [BigDataServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/bigdataservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=bigdataservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt BigDataServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+
+  WebDataServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/webdataservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  WebDataServiceDBConnectionString:
+    DependsOn: [WebDataServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/webdataservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=webdataservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt WebDataServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+  
+  EventServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/eventservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  EventServiceDBConnectionString:
+    DependsOn: [EventServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/eventservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=eventservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt EventServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+
+  OrgServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/orgservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  OrgServiceDBConnectionString:
+    DependsOn: [OrgServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/orgservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=orgservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt OrgServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+
+  UserServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/userservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  UserServiceDBConnectionString:
+    DependsOn: [UserServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/userservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=userservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt UserServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+
+  TagServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/tagservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  TagServiceDBConnectionString:
+    DependsOn: [TagServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/tagservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=tagservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt TagServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+  
+  ScanGroupServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/scangroupservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  ScanGroupServiceDBConnectionString:
+    DependsOn: [ScanGroupServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/scangroupservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=scangroupservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt ScanGroupServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+
+  AddressServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/addressservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  AddressServiceDBConnectionString:
+    DependsOn: [AddressServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/addressservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=addressservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt AddressServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+
+  FindingsServiceDBPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/db/findingsservice/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  FindingsServiceDBConnectionString:
+    DependsOn: [FindingsServiceDBPassword]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub "/am/${EnvironmentName}/db/findingsservice/dbstring"
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=findingsservice port='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBPort"
+          - ' dbname=linkai password='
+          - !GetAtt FindingsServiceDBPassword.Secret
+          - ' host='
+          - Fn::ImportValue:
+              !Sub "${EnvironmentName}-HakkenDBAddress" 
+
+  # pg_migration task items
+  PGMigrationLogGroup:
+    Type: AWS::Logs::LogGroup
+    #DeletionPolicy: Retain
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-pg-migrations"
+
+  PGMigrationReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-backend-query-db-passwords"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/*"
+  
+  PGMigrationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: pg-migrations
+      TaskRoleArn: !GetAtt 'PGMigrationReadSSMRole.Arn'
+      ContainerDefinitions:
+        - Name: pg-migrations
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/pg_migrations:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-pg-migrations"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'pg-migrations'
+  
+  PGMigrationDownTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: pg-migrations-down
+      TaskRoleArn: !GetAtt 'PGMigrationReadSSMRole.Arn'
+      ContainerDefinitions:
+        - Name: pg-migrations-down
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/pg_migrations:latest
+          Memory: 128
+          Essential: true
+          EntryPoint:
+            - "/go/bin/pgm"
+            - "-dir"
+            - "/tmp/migrations"
+            - "down"
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-pg-migrations"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'pg-migrations'
+
+  # am_migration task items
+  AMMigrationReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-ammigrations-linkai-db-passwords"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/linkai_admin/*"
+  
+  AMMigrationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: am-migrations
+      TaskRoleArn: !GetAtt 'AMMigrationReadSSMRole.Arn'
+      ContainerDefinitions:
+        - Name: am-migrations
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/am_migrations:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-pg-migrations"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'am-migrations'
+
+  AMMigrationDownTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: am-migrations-down
+      TaskRoleArn: !GetAtt 'AMMigrationReadSSMRole.Arn'
+      ContainerDefinitions:
+        - Name: am-migrations-down
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/am_migrations:latest
+          Memory: 128
+          Essential: true
+          EntryPoint:
+            - "/go/bin/amm"
+            - "-dir"
+            - "/tmp/migrations"
+            - "down"
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-pg-migrations"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'am-migrations'
+
+# am_migration task items
+  AMSystemIDSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub '${EnvironmentName}-linkai-password'
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/linkai_admin/*"
+      - PolicyName: !Sub '${EnvironmentName}-linkai-systemids'
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/system/*"
+  
+  AMSystemIDTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: db-systemids
+      TaskRoleArn: !GetAtt 'AMSystemIDSSMRole.Arn'
+      ContainerDefinitions:
+        - Name: db-systemids
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/db_systemids:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-pg-migrations"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'db_systemids'
+
+  PGMigrateTask:
+    Type: Custom::ECSTask
+    DependsOn: [PGMigrationTaskDefinition]
+    Properties:
+      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cfn-ecs-tasks"
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition:
+        Ref: PGMigrationTaskDefinition
+      Count: 1              
+      Timeout: 1800           # The maximum amount of time to wait for the task to complete - defaults to 290 seconds
+      RunOnUpdate: True       # Controls if the task should run for update operations - defaults to True
+      RunOnRollback: False    # Controls if the task should run in the event of a stack rollback - defaults to True
+      PollInterval: 30        # How often to poll the status of a given task
+
+
+  AMMigrateTask:
+    Type: Custom::ECSTask
+    DependsOn: [PGMigrateTask, AMMigrationTaskDefinition]
+    Properties:
+      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cfn-ecs-tasks"
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition:
+        Ref: AMMigrationTaskDefinition
+      Count: 1              
+      Timeout: 1800           # The maximum amount of time to wait for the task to complete - defaults to 290 seconds
+      RunOnUpdate: True       # Controls if the task should run for update operations - defaults to True
+      RunOnRollback: False    # Controls if the task should run in the event of a stack rollback - defaults to True
+      PollInterval: 30        # How often to poll the status of a given task
+
+  AMSystemIDTask:
+    Type: Custom::ECSTask
+    DependsOn: [AMMigrateTask]
+    Properties:
+      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cfn-ecs-tasks"
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition:
+        Ref: AMSystemIDTaskDefinition
+      Count: 1              
+      Timeout: 1800           # The maximum amount of time to wait for the task to complete - defaults to 290 seconds
+      RunOnUpdate: True       # Controls if the task should run for update operations - defaults to True
+      RunOnRollback: False    # Controls if the task should run in the event of a stack rollback - defaults to True
+      PollInterval: 30        # How often to poll the status of a given task
+
+  #db mailreports tasks
+  # mailreports email services
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !If [IsProduction, 'hakken.linkai.io', !Sub '${EnvironmentName}.hakken.linkai.io']
+  
+  DKIM:
+    Type: Custom::DKIM
+    DependsOn: HostedZone
+    Properties:
+      HostedZoneId: !Ref 'HostedZone'
+      Region: !Ref 'EmailRegion'
+      ServiceToken: !Join
+        - ':'
+        - - arn:aws:lambda
+          - !Ref 'AWS::Region'
+          - !Ref 'AWS::AccountId'
+          - function:linkai-cfn-ses-provider
+
+  DBMailReportsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-db-mailreports-linkai-db-passwords"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/linkai_admin/*"
+      - PolicyName: !Sub "${EnvironmentName}-db-mailreports-sendmail"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ses:SendEmail"
+              - "ses:SendRawEmail"
+            Resource: "*"
+
+  DBMailReportingEventECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${EnvironmentName}-DB-TrihourlyAggregate-CloudwatchEventsInvokeECSRunTask"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'ecs:RunTask'
+                Resource: !Ref MailReportsDailyTaskDefinition
+        - PolicyName: !Sub "${EnvironmentName}-DB-DailyAggregate-CloudwatchEventsInvokeECSRunTask"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'ecs:RunTask'
+                Resource: !Ref MailReportsWeeklyTaskDefinition
+
+  MailReportLogGroup:
+    Type: AWS::Logs::LogGroup
+    #DeletionPolicy: Retain
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-db-mailreports"
+
+  MailReportsDailyTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: db-mailreports
+      TaskRoleArn: !GetAtt 'DBMailReportsRole.Arn'
+      ContainerDefinitions:
+        - Name: db-mailreports
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/db_mailreports:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+            - Name: APP_RUN_TYPE
+              Value: 'daily'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-db-mailreports"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'db-mailreports'
+  
+  MailReportsWeeklyTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: db-mailreports
+      TaskRoleArn: !GetAtt 'DBMailReportsRole.Arn'
+      ContainerDefinitions:
+        - Name: db-mailreports
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/db_mailreports:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+            - Name: APP_RUN_TYPE
+              Value: 'weekly'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-db-mailreports"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'db-mailreports'
+
+  RunDailyDBMailReportsRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: !Sub "${EnvironmentName}-DB-DailyMailReports-ScheduledRule"
+      ScheduleExpression: "rate(24 hours)"
+      State: "ENABLED"
+      Targets:
+        - Id: !Sub "${EnvironmentName}-daily-mailreports-db-rule"
+          Arn: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${EnvironmentName}-backend-ecs-cluster'
+          RoleArn: !GetAtt DBMailReportingEventECSRole.Arn
+          EcsParameters:
+            TaskCount: 1
+            TaskDefinitionArn: !Ref 'MailReportsDailyTaskDefinition'
+  
+  RunWeeklyDBMailReportsRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: !Sub "${EnvironmentName}-DB-WeeklyMailReports-ScheduledRule"
+      ScheduleExpression: "cron(0 1 ? * MON *)"
+      State: "ENABLED"
+      Targets:
+        - Id: !Sub "${EnvironmentName}-weekly-mailreports-db-rule"
+          Arn: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${EnvironmentName}-backend-ecs-cluster'
+          RoleArn: !GetAtt DBMailReportingEventECSRole.Arn
+          EcsParameters:
+            TaskCount: 1
+            TaskDefinitionArn: !Ref 'MailReportsWeeklyTaskDefinition'
+
+  #db aggregation tasks
+  DBAggregateEventECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${EnvironmentName}-DB-TrihourlyAggregate-CloudwatchEventsInvokeECSRunTask"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'ecs:RunTask'
+                Resource: !Ref AggregateTrihourlyTaskDefinition
+        - PolicyName: !Sub "${EnvironmentName}-DB-DailyAggregate-CloudwatchEventsInvokeECSRunTask"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'ecs:RunTask'
+                Resource: !Ref AggregateDailyTaskDefinition
+
+  AggregateLogGroup:
+    Type: AWS::Logs::LogGroup
+    #DeletionPolicy: Retain
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-db-aggregates"
+
+  AggregateDailyTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: db-aggregates
+      TaskRoleArn: !GetAtt 'AMMigrationReadSSMRole.Arn'
+      ContainerDefinitions:
+        - Name: db-aggregates
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/db_aggregates:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+            - Name: APP_RUN_TYPE
+              Value: 'day'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-db-aggregates"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'db-aggregates'
+  
+  AggregateTrihourlyTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: db-aggregates
+      TaskRoleArn: !GetAtt 'AMMigrationReadSSMRole.Arn'
+      ContainerDefinitions:
+        - Name: db-aggregates
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/db_aggregates:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+            - Name: APP_RUN_TYPE
+              Value: 'trihourly'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-db-aggregates"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'db-aggregates'
+
+  RunDailyDBAggregateRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: !Sub "${EnvironmentName}-DB-DailyAggregate-ScheduledRule"
+      ScheduleExpression: "rate(3 hours)"
+      State: "ENABLED"
+      Targets:
+        - Id: !Sub "${EnvironmentName}-daily-db-rule"
+          Arn: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${EnvironmentName}-backend-ecs-cluster'
+          RoleArn: !GetAtt DBAggregateEventECSRole.Arn
+          EcsParameters:
+            TaskCount: 1
+            TaskDefinitionArn: !Ref 'AggregateDailyTaskDefinition'
+
+  RunTrihourlyDBAggregateRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: !Sub "${EnvironmentName}-DB-TrihourlyAggregate-ScheduledRule"
+      ScheduleExpression: "rate(15 minutes)"
+      State: "ENABLED"
+      Targets:
+        - Id: !Sub "${EnvironmentName}-trihourly-db-rule"
+          Arn: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${EnvironmentName}-backend-ecs-cluster'
+          RoleArn: !GetAtt DBAggregateEventECSRole.Arn
+          EcsParameters:
+            TaskCount: 1
+            TaskDefinitionArn: !Ref 'AggregateTrihourlyTaskDefinition'
+
+
+  # db tech update
+  DBTechUpdateEventECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${EnvironmentName}-DB-TechUpdate-CloudwatchEventsInvokeECSRunTask"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'ecs:RunTask'
+                Resource: !Ref TechUpdateTaskDefinition
+
+  TechUpdateLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-db-techupdate"
+
+  TechUpdateRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-techupdate-linkai-db-passwords"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/linkai_admin/*"
+      - PolicyName: !Sub "${EnvironmentName}-dbtechupdate-write-s3"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "s3:*"
+            Resource: !Sub "arn:aws:s3:::linkai-infra/${EnvironmentName}/*"
+  
+  TechUpdateTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: db-techupdate
+      TaskRoleArn: !GetAtt 'TechUpdateRole.Arn'
+      ContainerDefinitions:
+        - Name: db-techupdate
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/db_techupdate:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-db-techupdate"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'db-techupdate'
+
+  RunWeeklyTechUpdateRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: !Sub "${EnvironmentName}-DB-TechUpdate-ScheduledRule"
+      ScheduleExpression: "rate(7 days)"
+      State: "ENABLED"
+      Targets:
+        - Id: !Sub "${EnvironmentName}-weekly-db-techupdate-rule"
+          Arn: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${EnvironmentName}-backend-ecs-cluster'
+          RoleArn: !GetAtt DBTechUpdateEventECSRole.Arn
+          EcsParameters:
+            TaskCount: 1
+            TaskDefinitionArn: !Ref 'TechUpdateTaskDefinition'

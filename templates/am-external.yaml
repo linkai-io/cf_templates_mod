@@ -1,0 +1,58 @@
+Description: >
+    This template deploys the access key and secrets for external port scanners
+Parameters:
+    EnvironmentName:
+        Description: An environment name that will be prefixed to resource names
+        Default: dev 
+        AllowedValues: 
+            - dev
+            - qa
+            - prod
+        Type: String
+
+Conditions:
+  IsProduction:
+    !Equals [!Ref EnvironmentName, prod]
+
+Resources:
+  Scanner1GRPCToken: 
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/scanner1/token'
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  Scanner1User:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub '${EnvironmentName}-scanner1-user'
+      Path: "/"
+      Policies: 
+        - PolicyName: !Sub "${EnvironmentName}-scanner1-read-token"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/scanner1/token"
+              Condition:
+                IpAddress: 
+                  aws:SourceIp:
+                    - "209.126.252.34"
+
+  Scanner1AccessKey:
+    Type: Custom::AccessKey
+    DependsOn: [Scanner1User]
+    Properties:
+      UserName: !Ref Scanner1User
+      ParameterPath: !Sub '/am/iam-users/${EnvironmentName}-scanner1-user'
+      Serial: 1
+      Status: Active
+      ReturnSecret: False
+      ReturnPassword: False
+      NoEcho: False
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'

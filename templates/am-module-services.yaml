@@ -1,0 +1,264 @@
+Description: >
+    This template deploys the ecs services for the hakken service
+  
+Parameters:
+    EnvironmentName:
+        Description: An environment name that will be prefixed to resource names
+        Default: dev 
+        AllowedValues: 
+            - dev
+            - qa
+            - prod
+        Type: String
+
+Resources:
+  DefaultModuleServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${EnvironmentName}-default-moduleservice-state"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/state/*"
+        - PolicyName: !Sub "${EnvironmentName}-default-moduleservice-dns"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/dnsaddresses"
+        - PolicyName: !Sub "${EnvironmentName}-default-moduleservice-webpath"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/webfilepath"
+
+  DefaultModuleServiceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-modules-ecs-default-services-sg"
+      GroupDescription:  Default security group for module services
+      VpcId:
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 50051
+          ToPort: 50051
+          CidrIp: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-VPCCIDR"
+      Tags:
+        - Key: purpose
+          Value: allow access to grpc services
+
+  # nsmoduleservice task items
+  NSModuleServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Sub "${EnvironmentName}-modules-ecs-nsmoduleservice"
+
+  NSModuleServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: nsmoduleservice
+      TaskRoleArn: !GetAtt 'DefaultModuleServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: nsmoduleservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/nsmoduleservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-modules-ecs-nsmoduleservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'nsmoduleservice'
+  
+  NSModuleServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'nsmoduleservice-replica'
+      DesiredCount: 6
+      Cluster: !Sub "${EnvironmentName}-modules-ecs-cluster"
+      TaskDefinition: !Ref 'NSModuleServiceTaskDefinition'
+      SchedulingStrategy: 'REPLICA'
+
+  # brutemoduleservice task items
+  BruteModuleServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Sub "${EnvironmentName}-modules-ecs-brutemoduleservice"
+
+  BruteModuleServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: brutemoduleservice
+      TaskRoleArn: !GetAtt 'DefaultModuleServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: brutemoduleservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/brutemoduleservice:latest
+          Memory: 256
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-modules-ecs-brutemoduleservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'brutemoduleservice'
+  
+  BruteModuleServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'brutemoduleservice-replica'
+      DesiredCount: 6
+      Cluster: !Sub "${EnvironmentName}-modules-ecs-cluster"
+      TaskDefinition: !Ref 'BruteModuleServiceTaskDefinition'
+      SchedulingStrategy: 'REPLICA'
+
+
+  # bigdatamoduleservice task items
+  BigDataModuleServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${EnvironmentName}-bigdata-moduleservice-state"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/state/*"
+        - PolicyName: !Sub "${EnvironmentName}-bigdata-moduleservice-dns"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/dnsaddresses"
+        - PolicyName: !Sub "${EnvironmentName}-bigdata-moduleservice-credentials"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/bigdata/ct/credentials"
+        - PolicyName: !Sub "${EnvironmentName}-bigdata-moduleservice-systemids"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/system/*"
+
+  BigDataModuleServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Sub "${EnvironmentName}-modules-ecs-bigdatamoduleservice"
+
+  BigDataModuleServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: bigdatamoduleservice
+      TaskRoleArn: !GetAtt 'BigDataModuleServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: bigdatamoduleservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/bigdatamoduleservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+            - Name: APP_BQ_PROJECT_ID
+              Value: bigdata-216323
+            - Name: APP_BQ_DATASET_NAME
+              Value: ctdata
+            - Name: APP_BQ_TABLENAME
+              Value: cn_export_2_14_2019
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-modules-ecs-bigdatamoduleservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'bigdatamoduleservice'
+  
+  BigDataModuleServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'bigdatamoduleservice-replica'
+      DesiredCount: 6
+      Cluster: !Sub "${EnvironmentName}-modules-ecs-cluster"
+      TaskDefinition: !Ref 'BigDataModuleServiceTaskDefinition'
+      SchedulingStrategy: 'REPLICA'

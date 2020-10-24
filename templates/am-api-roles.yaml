@@ -1,0 +1,260 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template deploys the frontend console api roles (permissions applied after).
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Type: String
+
+Resources:
+  UnAuthIdentityPoolRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: unauthenticated
+  
+  AuthIdentityPoolRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+
+  #Create cognito group role/policies
+  InternalAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+
+  InternalReviewRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+
+  OwnerOrgRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+
+  AdminOrgRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+
+  AuditorOrgRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated      
+
+  EditorOrgRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated      
+
+  ReviewerOrgRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated   
+
+Outputs:
+  APIOrgGroupRoles:
+    Description: List of organization roles for the console API
+    Value: !Join [ ",", [ !GetAtt InternalAdminRole.Arn, !GetAtt InternalReviewRole.Arn, !GetAtt OwnerOrgRole.Arn, !GetAtt AdminOrgRole.Arn, !GetAtt AuditorOrgRole.Arn, !GetAtt EditorOrgRole.Arn, !GetAtt ReviewerOrgRole.Arn ]]
+    Export:
+      Name: !Sub ${EnvironmentName}-APIOrgGroupRoles
+  
+  UnAuthIdentityPoolRole:
+    Description: UnAuthIdentityPoolRole
+    Value: !GetAtt UnAuthIdentityPoolRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-UnAuthIdentityPoolRole
+
+  UnAuthIdentityPoolRoleId:
+    Description: UnAuthIdentityPoolRoleId
+    Value: !GetAtt UnAuthIdentityPoolRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-UnAuthIdentityPoolRoleId
+
+  AuthIdentityPoolRole:
+    Description: AuthIdentityPoolRole
+    Value: !GetAtt AuthIdentityPoolRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-AuthIdentityPoolRole
+
+  AuthIdentityPoolRoleId:
+    Description: AuthIdentityPoolRoleId
+    Value: !GetAtt AuthIdentityPoolRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-AuthIdentityPoolRoleId
+
+  InternalAdminRole:
+    Description: InternalAdminRole
+    Value: !GetAtt InternalAdminRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-InternalAdminRole
+
+  InternalAdminRoleId:
+    Description: InternalAdminRoleId
+    Value: !GetAtt InternalAdminRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-InternalAdminRoleId
+
+  InternalReviewRole:
+    Description: InternalReviewRole
+    Value: !GetAtt InternalReviewRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-InternalReviewRole
+
+  InternalReviewRoleId:
+    Description: InternalReviewRoleId
+    Value: !GetAtt InternalReviewRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-InternalReviewRoleId
+
+  OwnerOrgRole:
+    Description: OwnerOrgRole
+    Value: !GetAtt OwnerOrgRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-OwnerOrgRole
+
+  OwnerOrgRoleId:
+    Description: OwnerOrgRoleId
+    Value: !GetAtt OwnerOrgRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-OwnerOrgRoleId
+
+  AdminOrgRole:
+    Description: AdminOrgRole
+    Value: !GetAtt AdminOrgRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-AdminOrgRole
+
+  AdminOrgRoleId:
+    Description: AdminOrgRoleId
+    Value: !GetAtt AdminOrgRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-AdminOrgRoleId
+
+  AuditorOrgRole:
+    Description: AuditorOrgRole
+    Value: !GetAtt AuditorOrgRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-AuditorOrgRole
+
+  AuditorOrgRoleId:
+    Description: AuditorOrgRoleId
+    Value: !GetAtt AuditorOrgRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-AuditorOrgRoleId
+
+  EditorOrgRole:
+    Description: EditorOrgRole
+    Value: !GetAtt EditorOrgRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-EditorOrgRole
+
+  EditorOrgRoleId:
+    Description: EditorOrgRoleId
+    Value: !GetAtt EditorOrgRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-EditorOrgRoleId
+
+  ReviewerOrgRole:
+    Description: ReviewerOrgRole
+    Value: !GetAtt ReviewerOrgRole.Arn
+    Export: 
+      Name: !Sub ${EnvironmentName}-ReviewerOrgRole
+
+  ReviewerOrgRoleId:
+    Description: ReviewerOrgRoleId
+    Value: !GetAtt ReviewerOrgRole.RoleId
+    Export: 
+      Name: !Sub ${EnvironmentName}-ReviewerOrgRoleId

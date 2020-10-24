@@ -1,0 +1,161 @@
+Description: >
+    This template provisions the support organization for managing hakken
+  
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+      - dev
+      - qa
+      - prod
+    Type: String
+  InternalAdminRole:
+    Description: Internal admin role
+    Type: String
+  InternalReviewRole:
+    Description: Internal reviewer only role
+    Type: String
+  UnAuthIdentityPoolRole:
+    Description: Unauthenticated identity pool role
+    Type: String
+  AuthIdentityPoolRole:
+    Description: Authenticated identity pool role
+    Type: String
+
+Resources:
+  SupportOrgPassword: 
+    Type: Custom::Secret
+    Properties: 
+      Name: !Sub "/am/${EnvironmentName}/frontend/support/pwd"
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  SupportOrgLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-support-org-provision"
+
+  OrgProvisionPolicy:
+    Type: AWS::IAM::Policy
+    DependsOn:
+      - OrgProvisionRole
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-support-org-provision-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - "iam:GetRole"
+              - "iam:PassRole"
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/hakken-${EnvironmentName}-frontend*"
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/frontend/support/pwd"
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/system/*"
+          - Effect: Allow
+            Action:
+              - "cognito-identity:*"
+              - "cognito-idp:*"
+              - "cognito-sync:*"
+              - "iam:ListRoles"
+              - "iam:ListOpenIdConnectProviders"
+              - "sns:ListPlatformApplications"
+            Resource:
+              - '*'
+          - Action:
+              - logs:*
+            Resource: arn:aws:logs:*:*:*
+            Effect: Allow
+      Roles:
+        - !Ref 'OrgProvisionRole'
+    
+  OrgProvisionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      
+  OrgProvisionTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn: [OrgProvisionRole, SupportOrgPassword]
+    Properties:
+      Family: support-org-provision
+      TaskRoleArn: !GetAtt 'OrgProvisionRole.Arn'
+      ContainerDefinitions:
+        - Name: support-org-provision
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/support_org_provision:latest
+          Memory: 128
+          Essential: true
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+            - Name: CONSUL_HTTP_ADDR
+              Value: 
+                Fn::ImportValue: 
+                  !Sub "${EnvironmentName}-ConsulServerAddr"
+            - Name: task 
+              Value: CREATE
+            - Name: email
+              Value: "linkai-support@linkai.io"
+            - Name: orgname
+              Value: "linkai-support"
+            - Name: firstname
+              Value: "linkai"
+            - Name: lastname
+              Value: "support" 
+            - Name: "unauthenticated"
+              Value: 
+                Fn::ImportValue:
+                  !Sub ${EnvironmentName}-UnAuthIdentityPoolRole
+            - Name: "authenticated"
+              Value: 
+                Fn::ImportValue:
+                  !Sub ${EnvironmentName}-AuthIdentityPoolRole
+            - Name: "owner"
+              Value: 
+                Fn::ImportValue:
+                  !Sub ${EnvironmentName}-InternalAdminRole
+            - Name: "admin"
+              Value: 
+                Fn::ImportValue:
+                  !Sub ${EnvironmentName}-InternalAdminRole
+            - Name: "reviewer"
+              Value:
+                Fn::ImportValue:
+                  !Sub ${EnvironmentName}-InternalReviewRole
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-support-org-provision"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'support_org_provision'
+
+  OrgProvisionTask:
+    Type: Custom::ECSTask
+    DependsOn: [OrgProvisionTaskDefinition]
+    Properties:
+      ServiceToken: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cfn-ecs-tasks"
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition:
+        Ref: OrgProvisionTaskDefinition
+      Count: 1              
+      Timeout: 1800           # The maximum amount of time to wait for the task to complete - defaults to 290 seconds
+      RunOnUpdate: True       # Controls if the task should run for update operations - defaults to True
+      RunOnRollback: False    # Controls if the task should run in the event of a stack rollback - defaults to True
+      PollInterval: 30        # How often to poll the status of a given task

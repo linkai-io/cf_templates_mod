@@ -1,0 +1,74 @@
+Description: >
+    This template deploys the entire Hakken AM stack to an environment.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+      - dev
+      - qa
+      - prod
+    Type: String
+
+  BackendClusterSize:
+    Description: Number of instances for the backend cluster
+    Type: Number 
+    Default: 2
+
+  BackendECSInstanceType:
+    Description: The instance type the ECS Host instance will launch under.
+    Type: String
+    Default: t2.medium
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  DBInstanceClass:
+    Description: The instance type for the database system.
+    Type: String
+    Default: db.t3.medium
+
+  DBPort:
+    Description: Port for the RDS instance to listen on
+    Type: Number
+    Default: 5432
+
+Resources:
+  AMDBStack:
+    Type: AWS::CloudFormation::Stack 
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        DBPort: !Ref DBPort
+        DBInstanceClass: !Ref DBInstanceClass
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-db.yaml'
+      TimeoutInMinutes: '30'
+
+  AMBackendECSStack:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [AMDBStack]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        BackendClusterSize: !Ref BackendClusterSize
+        BackendECSInstanceType: !Ref BackendECSInstanceType
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-backend-ecs.yaml'
+      TimeoutInMinutes: '30'
+
+  DBMigrationsStack:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [AMBackendECSStack]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-db-migrations.yaml'
+      TimeoutInMinutes: '30'
+
+  AMBackendServicesStack:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [DBMigrationsStack]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-backend-services.yaml'
+      TimeoutInMinutes: '30'
+
+

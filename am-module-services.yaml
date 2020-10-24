@@ -1,0 +1,63 @@
+Description: >
+    This template deploys the entire Hakken AM stack to an environment.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+      - dev
+      - qa
+      - prod
+    Type: String
+
+  WebModuleNumInstances:
+    Description: Number of instances for this web module
+    Type: Number 
+    Default: 2
+
+  WebModuleInstanceType:
+    Description: WebModule EC2 instance type
+    Type: String
+    Default: t2.micro
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  ModuleClusterSize:
+    Description: Number of instances for this cluster
+    Type: Number 
+    Default: 2
+
+  ModuleInstanceType:
+    Description: The instance type the ECS Host instance will launch under.
+    Type: String
+    Default: t2.medium
+    ConstraintDescription: must be a valid EC2 instance type.
+
+
+Resources:
+  AMModuleECSStack:
+    Type: AWS::CloudFormation::Stack 
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ModuleClusterSize: !Ref ModuleClusterSize
+        ModuleInstanceType: !Ref ModuleInstanceType
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-modules-ecs.yaml'
+      TimeoutInMinutes: '50'
+  
+  AMWebModuleServicesStack:
+    Type: AWS::CloudFormation::Stack 
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-module-services.yaml'
+      TimeoutInMinutes: '30'
+
+  AMWebModuleInstancesStack:
+    Type: AWS::CloudFormation::Stack 
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        WebModuleNumInstances: !Ref WebModuleNumInstances
+        WebModuleInstanceType: !Ref WebModuleInstanceType
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-module-web-instances.yaml'
+      TimeoutInMinutes: '30'

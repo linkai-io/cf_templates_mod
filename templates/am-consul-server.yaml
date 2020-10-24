@@ -1,0 +1,292 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template deploys the consul server for service discovery of the AM services.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Type: String
+  ConsulInstanceType:
+    Description: Consul EC2 instance type
+    Type: String
+    Default: t1.micro
+    AllowedValues:
+      - t1.micro
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t2.large
+      - m1.small
+      - m1.medium
+      - m1.large
+      - m1.xlarge
+      - m2.xlarge
+      - m2.2xlarge
+      - m2.4xlarge
+      - m3.medium
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m4.10xlarge
+      - c1.medium
+      - c1.xlarge
+      - c3.large
+      - c3.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - g2.2xlarge
+      - g2.8xlarge
+      - r3.large
+      - r3.xlarge
+      - r3.2xlarge
+      - r3.4xlarge
+      - r3.8xlarge
+      - i2.xlarge
+      - i2.2xlarge
+      - i2.4xlarge
+      - i2.8xlarge
+      - d2.xlarge
+      - d2.2xlarge
+      - d2.4xlarge
+      - d2.8xlarge
+      - hi1.4xlarge
+      - hs1.8xlarge
+      - cr1.8xlarge
+      - cc2.8xlarge
+      - cg1.4xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+
+Resources:
+  # Key & Security Related
+  ConsulServerPrivateKey:
+    Type: Custom::RSAKey
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/consul/key'
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  ConsulServerKeyPair:
+    Type: Custom::KeyPair
+    DependsOn: ConsulServerPrivateKey
+    Properties:
+      Name: !Sub ${EnvironmentName}-ConsulServerKeyPair
+      PublicKeyMaterial: !GetAtt 'ConsulServerPrivateKey.PublicKey'
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  ConsulSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-consul-server-sg"
+      GroupDescription: Allow access to consul discovery server
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 
+          Fn::ImportValue: 
+            !Sub "${EnvironmentName}-VPCCIDR"
+      - IpProtocol: tcp
+        FromPort: 8300
+        ToPort: 8600
+        CidrIp: 
+          Fn::ImportValue: 
+            !Sub "${EnvironmentName}-VPCCIDR"
+      - IpProtocol: udp
+        FromPort: 8300
+        ToPort: 8600
+        CidrIp: 
+          Fn::ImportValue: 
+            !Sub "${EnvironmentName}-VPCCIDR"
+      Tags:
+        - Key: purpose
+          Value: allow access to consul discovery server
+
+  # S3 Authentication/Role to allow downloading server.zip from infra bucket
+  ConsulServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: 
+        Statement:
+          Effect: "Allow"
+          Principal:
+            Service:
+              - "ec2.amazonaws.com"
+          Action:
+            - "sts:AssumeRole"
+    
+  ConsulServerIAMPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${EnvironmentName}-ConsulServerS3Policy
+      PolicyDocument:
+        Statement:
+          Action:
+            - "s3:GetObject"
+          Effect: "Allow"
+          Resource: !Sub "arn:aws:s3:::linkai-infra/${EnvironmentName}/consul/server.zip"
+      Roles:
+       - !Ref ConsulServerRole  
+  
+  ConsulServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref ConsulServerRole
+
+  # Consul Instance
+  ConsulEC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: [ConsulServerKeyPair, ConsulSecurityGroup, ConsulServerInstanceProfile]
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT7M
+        Count: '1'
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          full_install:
+            - install_and_enable_cfn_hup
+        install_and_enable_cfn_hup:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Join
+                - ''
+                - - "[main]\n"
+                  - stack=
+                  - !Ref 'AWS::StackId'
+                  - "\n"
+                  - region=
+                  - !Ref 'AWS::Region'
+                  - "\n"
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Join
+                - ''
+                - - "[cfn-auto-reloader-hook]\n"
+                  - "triggers=post.update\n"
+                  - "path=Resources.ConsulEC2Instance.Metadata.AWS::CloudFormation::Init\n"
+                  - 'action=/opt/aws/bin/cfn-init -v '
+                  - '         --stack '
+                  - !Ref 'AWS::StackName'
+                  - '         --resource ConsulEC2Instance '
+                  - '         --configsets full_install '
+                  - '         --region '
+                  - !Ref 'AWS::Region'
+                  - "\n"
+                  - "runas=root\n"
+            /lib/systemd/system/cfn-hup.service:
+              content: !Join
+                - ''
+                - - "[Unit]\n"
+                  - "Description=cfn-hup daemon\n\n"
+                  - "[Service]\n"
+                  - "Type=simple\n"
+                  - "ExecStart=/opt/aws/bin/cfn-hup\n"
+                  - "Restart=always\n\n"
+                  - "[Install]\n"
+                  - WantedBy=multi-user.target
+          commands:
+            '01enable_cfn_hup':
+              command: systemctl enable cfn-hup.service
+            '02start_cfn_hup':
+              command: systemctl start cfn-hup.service
+    Properties:
+      IamInstanceProfile: !Ref ConsulServerInstanceProfile
+      InstanceType: !Ref 'ConsulInstanceType'
+      KeyName: !Sub ${EnvironmentName}-ConsulServerKeyPair
+      ImageId: ami-0565af6e282977273
+      Monitoring: false
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet: 
+            - Ref: "ConsulSecurityGroup"
+            - Fn::ImportValue:
+                !Sub ${EnvironmentName}-RemoteWorkersSG
+          SubnetId: 
+            Fn::ImportValue: 
+              !Sub '${EnvironmentName}-PublicSubnet1'
+      UserData: !Base64
+        Fn::Join:
+          - ''
+          - - "#!/bin/bash -xe\n"
+            - "apt-get update -y\n"
+            - "apt-get -y install awscli zip\n"
+            - !Sub "aws s3 cp s3://linkai-infra/${EnvironmentName}/consul/server.zip server.zip && unzip server.zip\n"
+            - "cd consul && ./install_consul.sh && cd ..\n"
+            - "apt-get install -y python-setuptools\n"
+            - "mkdir -p /opt/aws/bin\n"
+            - "wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n"
+            - "easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-latest.tar.gz\n"
+            - '/opt/aws/bin/cfn-init -v '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource ConsulEC2Instance '
+            - '         --configsets full_install '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - "\n"
+            - '/opt/aws/bin/cfn-signal -e $? '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource ConsulEC2Instance '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - "\n"
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-ConsulServer"
+
+  ConsulServerIPParameter:
+    Type: Custom::Secret
+    DependsOn: ConsulEC2Instance
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/discovery/config'
+      KeyAlias: alias/aws/ssm
+      Content: !Join
+        - ''
+        - - !GetAtt ConsulEC2Instance.PrivateIp
+          - ':8500'
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+Outputs:
+  ConsulServerAddr:
+    Description: A reference to the consul server address for service discovery
+    Value: !Join
+        - ''
+        - - !GetAtt ConsulEC2Instance.PrivateIp
+          - ':8500'
+    Export: 
+      Name: !Sub ${EnvironmentName}-ConsulServerAddr
+
+  ConsulServerIP:
+    Description: A reference to the consul server for service discovery
+    Value: !GetAtt ConsulEC2Instance.PrivateIp
+    Export: 
+      Name: !Sub ${EnvironmentName}-ConsulServerIP
+
+  ConsulServerDNS:
+    Description: A reference to the consul server dns for service discovery
+    Value: !GetAtt ConsulEC2Instance.PrivateDnsName
+    Export: 
+      Name: !Sub ${EnvironmentName}-ConsulServerDNS

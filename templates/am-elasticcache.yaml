@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template deploys the ElasticCache service for the AM services.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Type: String
+
+  CacheNodeType:
+    Description: The cache instance type the nodes will launch under.
+    Type: String
+    Default: cache.t2.micro
+    AllowedValues:
+      - cache.t2.micro
+      - cache.t2.small
+      - cache.t2.medium
+      - cache.m3.medium
+      - cache.m3.large
+      - cache.m3.xlarge
+      - cache.m3.2xlarge
+      - cache.r3.large
+      - cache.r3.xlarge
+      - cache.r3.2xlarge
+      - cache.r3.4xlarge
+      - cache.r3.8xlarge
+    ConstraintDescription: must be a valid cache instance type.
+
+Resources:
+  CachePassword: 
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/state/pwd'
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+  
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-cache-server-sg"
+      GroupDescription: Allow access to cache instance
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 6379
+        ToPort: 6379
+        CidrIp: 
+          Fn::ImportValue: 
+            !Sub "${EnvironmentName}-VPCCIDR"
+
+  CacheParameterGroup: 
+    Type: AWS::ElastiCache::ParameterGroup
+    Properties: 
+      Description: !Sub "${EnvironmentName}-CacheParameterGroup"
+      CacheParameterGroupFamily: "redis5.0"
+      Properties: 
+        timeout: 360
+        tcp-keepalive: 60
+
+  CacheSubnetGroup: 
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties: 
+      Description: !Sub "${EnvironmentName}-CacheSubnetGroup"
+      SubnetIds: 
+        - Fn::ImportValue: 
+            !Sub "${EnvironmentName}-PublicSubnet1"
+
+  CacheInstance:
+    Type: AWS::ElastiCache::ReplicationGroup
+    DependsOn: [CacheSecurityGroup, CachePassword, CacheParameterGroup, CacheSubnetGroup]
+    Properties:
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      AuthToken: !GetAtt CachePassword.Secret
+      AutoMinorVersionUpgrade: true
+      AutomaticFailoverEnabled: false
+      CacheNodeType: !Ref CacheNodeType 
+      CacheParameterGroupName: !Ref CacheParameterGroup
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      ReplicationGroupDescription: !Sub "${EnvironmentName}-Cache"
+      Engine: "redis"
+      EngineVersion: "5.0.0"
+      Port: 6379
+      NumNodeGroups: 1 
+      SecurityGroupIds:
+        - !Ref CacheSecurityGroup
+      Tags:
+        -
+          Key: Description
+          Value: !Sub "The ${EnvironmentName} cache instance"
+
+  CacheAddressParameter:
+    DependsOn: [CacheInstance]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/state/config'
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'rediss://'
+          - !GetAtt CacheInstance.PrimaryEndPoint.Address
+          - ':'
+          - !GetAtt CacheInstance.PrimaryEndPoint.Port
+
+Outputs:
+  CacheServerAddress:
+    Description: A reference to the Cache server for supporting distributed state
+    Value: !GetAtt CacheInstance.PrimaryEndPoint.Address
+    Export: 
+      Name: !Sub ${EnvironmentName}-CacheServerAddress

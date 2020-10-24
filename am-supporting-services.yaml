@@ -1,0 +1,69 @@
+Description: >
+    This template deploys the supporting services (consul, dns, redis) Hakken AM stack to an environment.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+      - dev
+      - qa
+      - prod
+    Type: String
+
+  ConsulInstanceType:
+    Description: Consul EC2 instance type
+    Type: String
+    Default: t1.micro
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  CacheNodeType:
+    Description: The cache instance type the nodes will launch under.
+    Type: String
+    Default: cache.t2.micro
+    ConstraintDescription: must be a valid cache instance type.
+
+  UnboundInstanceType:
+    Description: Unbound EC2 instance type
+    Type: String
+    Default: t2.medium
+    ConstraintDescription: must be a valid EC2 instance type.
+
+
+Resources:
+  RemoteWorkersStack:
+    Type: AWS::CloudFormation::Stack 
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-remote-sg.yaml'
+      TimeoutInMinutes: '3'
+  
+  ElasticCacheStack:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [RemoteWorkersStack]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        CacheNodeType: !Ref CacheNodeType
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-elasticcache.yaml'
+      TimeoutInMinutes: '20'
+  
+  ConsulServerStack:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [RemoteWorkersStack]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ConsulInstanceType: !Ref ConsulInstanceType
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-consul-server.yaml'
+      TimeoutInMinutes: '20'
+    
+  UnboundServerStack:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [RemoteWorkersStack]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        UnboundInstanceType: !Ref UnboundInstanceType
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-unbound-build.yaml'
+      TimeoutInMinutes: '60'

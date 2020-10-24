@@ -1,0 +1,55 @@
+Description: >
+    This template deploys the supporting functions such as sending webhooks to be called by other services
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+      - dev
+      - qa
+      - prod
+    Type: String
+  S3BucketPrefix:
+    Type: String
+    Default: 'linkai-infra'
+
+Resources:
+  WebhookAppSenderRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["lambda.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+      Policies:
+        - PolicyName: !Sub '${EnvironmentName}-webhook-sender-logs'
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "logs:CreateLogGroup"
+                - "logs:CreateLogStream"
+                - "logs:PutLogEvents"
+              Resource:
+                - '*'
+
+  WebhookAppSenderFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: [WebhookAppSenderRole]
+    Properties:
+      Description: !Sub '${EnvironmentName} Webhook Sender Function'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: !Sub '${EnvironmentName}/lambdas/webhook_sender.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-webhook-sender'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'WebhookAppSenderRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'

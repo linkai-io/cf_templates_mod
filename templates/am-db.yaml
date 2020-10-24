@@ -1,0 +1,119 @@
+Description: >
+    This template deploys the Hakken database.
+  
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+      - dev
+      - qa
+      - prod
+    Type: String
+
+  DBInstanceClass:
+    Description: The instance type for the database system.
+    Type: String
+    Default: db.t2.micro
+
+  DBPort:
+    Description: Port for the RDS instance to listen on
+    Type: Number
+    Default: 5432
+
+Conditions:
+  IsProduction:
+    !Equals [!Ref EnvironmentName, prod]
+
+Resources:
+  PostgresDBPassword: 
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/db/postgres/pwd'
+      Alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+      Length: 30
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  HakkenDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-hakken-db-sg"
+      GroupDescription: Allow access to rds instance from vpc addresses only
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Sub "${DBPort}"
+          ToPort: !Sub "${DBPort}"
+          CidrIp: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-VPCCIDR"
+      Tags:
+        - Key: purpose
+          Value: allow access to db instance
+
+  HakkenDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupName: !Sub '${EnvironmentName}-hakken-DBSubnet'
+      DBSubnetGroupDescription: "The Subnet for the hakken DB"
+      SubnetIds:
+        - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+        - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  HakkenDB:
+    DependsOn: [PostgresDBPassword, HakkenDBSubnetGroup, HakkenDBSecurityGroup]
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: !If [IsProduction, 150, 20]
+      BackupRetentionPeriod: !If [IsProduction, 3, 0]  
+      DBInstanceClass: !If [IsProduction, db.t3.medium, !Ref DBInstanceClass]
+      DBInstanceIdentifier: !Sub '${EnvironmentName}-hakken-db'
+      DBSubnetGroupName: !Sub '${EnvironmentName}-hakken-DBSubnet'
+      Engine: postgres
+      DeletionProtection: true
+      DeleteAutomatedBackups: false
+      EngineVersion: 10.6
+      MasterUsername: postgres
+      MasterUserPassword: !GetAtt PostgresDBPassword.Secret
+      MultiAZ: false
+      PubliclyAccessible: false
+      Port: !Sub "${DBPort}"
+      VPCSecurityGroups: 
+        - !Ref HakkenDBSecurityGroup
+      Tags:
+        -
+          Key: "Description"
+          Value: "The hakken postgres DB"
+        - Key: "Name"
+          Value: "hakken-db"
+
+  PostgresDBConnectionString:
+    DependsOn: [HakkenDB]
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/db/postgres/dbstring'
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+      Content: !Join
+        - ''
+        - - 'user=postgres port='
+          - !GetAtt [HakkenDB, Endpoint.Port] 
+          - ' dbname=postgres password='
+          - !GetAtt [PostgresDBPassword, Secret]
+          - ' host='
+          - !GetAtt [HakkenDB, Endpoint.Address]
+
+Outputs:
+  HakkenDB:
+    Value: !GetAtt [HakkenDB, Endpoint.Port]
+    Description: The HakkenDB Port
+    Export:
+      Name: !Sub ${EnvironmentName}-HakkenDBPort
+  
+  HakkenDBAddress:
+    Value: !GetAtt [HakkenDB, Endpoint.Address]
+    Description: The HakkenDB Address 
+    Export:
+      Name: !Sub ${EnvironmentName}-HakkenDBAddress

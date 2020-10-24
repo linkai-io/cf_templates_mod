@@ -1,0 +1,659 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template deploys the web module autoscaling group for the AM services.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Type: String
+  WebModuleNumInstances:
+    Description: Number of instances for this web module
+    Type: Number 
+    Default: 2
+  WebModuleInstanceType:
+    Description: WebModule EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t1.micro
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t2.large
+      - m1.small
+      - m1.medium
+      - m1.large
+      - m1.xlarge
+      - m2.xlarge
+      - m2.2xlarge
+      - m2.4xlarge
+      - m3.medium
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m4.10xlarge
+      - c1.medium
+      - c1.xlarge
+      - c3.large
+      - c3.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - g2.2xlarge
+      - g2.8xlarge
+      - r3.large
+      - r3.xlarge
+      - r3.2xlarge
+      - r3.4xlarge
+      - r3.8xlarge
+      - i2.xlarge
+      - i2.2xlarge
+      - i2.4xlarge
+      - i2.8xlarge
+      - d2.xlarge
+      - d2.2xlarge
+      - d2.4xlarge
+      - d2.8xlarge
+      - hi1.4xlarge
+      - hs1.8xlarge
+      - cr1.8xlarge
+      - cc2.8xlarge
+      - cg1.4xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+
+Conditions:
+  IsProduction:
+    !Equals [!Ref EnvironmentName, prod]
+
+Resources:
+  WebDataS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+      AccessControl: Private
+      BucketName: !Sub "${EnvironmentName}-linkai-webdata"
+
+   # Key & Security Related
+  WebModuleServerPrivateKey:
+    Type: Custom::RSAKey
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/webmoduleservice/key'
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  WebModuleServerKeyPair:
+    Type: Custom::KeyPair
+    DependsOn: WebModuleServerPrivateKey
+    Properties:
+      Name: !Sub ${EnvironmentName}-WebModuleServerKeyPair
+      PublicKeyMaterial: !GetAtt 'WebModuleServerPrivateKey.PublicKey'
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  WebModuleSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-webmoduleservice-sg"
+      GroupDescription: Allow access to web module service
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 50051
+        ToPort: 50051
+        CidrIp: 
+          Fn::ImportValue: 
+            !Sub "${EnvironmentName}-VPCCIDR"
+      Tags:
+        - Key: Name 
+          Value: !Sub "${EnvironmentName}-WebModule"
+        - Key: purpose
+          Value: run web module checks
+  
+  WebModuleServerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Sub "${EnvironmentName}-webmoduleservice"
+
+  WebModuleServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [application-autoscaling.amazonaws.com, ec2.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${EnvironmentName}-webmoduleservice-logging"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - 'logs:CreateLogStream'
+                - 'logs:CreateLogGroup'
+                - 'logs:PutLogEvents'
+                - 'logs:DescribeLogStreams'
+              Resource: 'arn:aws:logs:*:*:*'
+        - PolicyName: !Sub "${EnvironmentName}-webmoduleservice-autoscaling"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - 'application-autoscaling:*'
+                - 'cloudwatch:DescribeAlarms'
+                - 'cloudwatch:PutMetricAlarm'
+                - 'ec2:DescribeInstances'
+              Resource: '*'
+        - PolicyName: !Sub "${EnvironmentName}-webmoduleservice-state"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/state/*"
+        - PolicyName: !Sub "${EnvironmentName}-webmoduleservice-dns"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/dnsaddresses"
+        - PolicyName: !Sub "${EnvironmentName}-webmoduleservice-s3-deploy-consul-readonly"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "s3:GetObject"
+              Resource: !Sub "arn:aws:s3:::linkai-infra/${EnvironmentName}/consul/server.zip"
+        - PolicyName: !Sub "${EnvironmentName}-webmoduleservice-s3-deploy-webmodule-readonly"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "s3:GetObject"
+              Resource: !Sub "arn:aws:s3:::linkai-infra/${EnvironmentName}/webmodule/webmodule.zip"
+        - PolicyName: !Sub "${EnvironmentName}-webmoduleservice-s3-writewebdata"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "s3:*"
+              Resource: !Sub "arn:aws:s3:::${EnvironmentName}-linkai-webdata/*"
+        - PolicyName: !Sub "${EnvironmentName}-webmoduleservice-s3-get-techdata"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "s3:GetObject"
+              Resource: !Sub "arn:aws:s3:::linkai-infra/${EnvironmentName}/web/apps.json"
+ 
+  WebModuleInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles: 
+        - !Ref WebModuleServerRole
+
+  WebModuleLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    DependsOn: [WebModuleServerKeyPair, WebModuleSecurityGroup]
+    Properties:
+      LaunchTemplateName: !Sub "${EnvironmentName}-WebModuleServiceTemplate"
+      LaunchTemplateData:
+        TagSpecifications:
+          -
+            ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "${EnvironmentName}-WebModuleServer"
+        KeyName: !Sub ${EnvironmentName}-WebModuleServerKeyPair
+        ImageId: ami-0565af6e282977273
+        InstanceType: !If [IsProduction, t2.small, !Ref 'WebModuleInstanceType']
+        IamInstanceProfile: 
+          Arn: !GetAtt WebModuleInstanceProfile.Arn 
+        NetworkInterfaces:
+          -
+            DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            SubnetId: 
+              Fn::ImportValue: 
+                !Sub '${EnvironmentName}-PublicSubnet1'
+            Groups:
+            - !Ref WebModuleSecurityGroup
+            - Fn::ImportValue:
+                !Sub "${EnvironmentName}-RemoteWorkersSG"
+        Monitoring:
+          Enabled: true
+        UserData: 
+          # The following literal block is a script which runs on
+          # each EC2 instance in the autoscaling group on boot to
+          # setup up configuration files 
+          Fn::Base64:
+            Fn::Join:
+              - ''
+              - - !Sub |
+                  #!/bin/bash -x
+                  EC2_INSTANCE_IP_ADDRESS=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+                  EC2_INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+                  apt-get update -y 
+                  apt-get -y install apt-transport-https \
+                    ca-certificates \
+                    curl \
+                    gnupg \
+                    hicolor-icon-theme \
+                    libcanberra-gtk* \
+                    libgl1-mesa-dri \
+                    libgl1-mesa-glx \
+                    libpango1.0-0 \
+                    libpulse0 \
+                    libv4l-0 \
+                    fonts-symbola \
+                    --no-install-recommends 
+                  curl -sSL https://dl.google.com/linux/linux_signing_key.pub | apt-key add - 
+                  echo 'deb [arch=amd64] https://dl.google.com/linux/chrome/deb/ stable main' > /etc/apt/sources.list.d/google.list 
+                  apt-get update && apt-get install -y google-chrome-stable --no-install-recommends 
+                  # install bootstrap
+                  apt-get install -y awscli zip python-setuptools
+                  mkdir -p /opt/aws/bin
+                  wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+                  easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-latest.tar.gz
+                  # install web module service
+                  useradd webmoduleservice -s /sbin/nologin -M
+                  aws s3 cp s3://linkai-infra/${EnvironmentName}/webmodule/webmodule.zip webmodule.zip
+                  if [ $? -ne 0 ]; then
+                    /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource WebModuleAutoScalingGroup --region ${AWS::Region}
+                    exit 1
+                  fi
+                  mkdir -p /opt/webmodule/ && unzip webmodule.zip && chmod +x deploy_files/webmodule/webmoduleservice && cp deploy_files/webmodule/webmoduleservice /opt/webmodule/webmoduleservice
+                  # install web user and browser leaser
+                  useradd -r -m webuser
+                  chmod +x deploy_files/webmodule/gcdleaser && cp deploy_files/webmodule/gcdleaser /home/webuser/gcdleaser
+                  # block ip ranges we do not allow the browser to access
+                  iptables -A OUTPUT -p tcp -d 169.254.0.0/16 -m owner --uid-owner webuser -j REJECT
+                  iptables -A OUTPUT -p tcp -d 10.0.0.0/8 -m owner --uid-owner webuser -j REJECT
+                  iptables -A OUTPUT -p tcp -d 127.0.0.0/8 --destination-port 8500 -m owner --uid-owner webuser -j REJECT
+                  # install consul agent and generate consul agent config file
+                  #
+                  aws s3 cp s3://linkai-infra/${EnvironmentName}/consul/server.zip server.zip
+                  useradd consulservice -s /sbin/nologin -M
+                  mkdir -p /opt/consul/ && unzip server.zip && chmod +x consul/consul && cp consul/consul /opt/consul/consul 
+                  mkdir -p /opt/consul/data
+                  mkdir -p /opt/consul/config
+                  chown -R consulservice:consulservice /opt/consul
+                  cat << EOF > /opt/consul/config/consul-agent.json
+                  {
+                - |
+                    "advertise_addr": "${EC2_INSTANCE_IP_ADDRESS}",
+                    "client_addr": "0.0.0.0",
+                    "node_name": "${EC2_INSTANCE_ID}",
+                    "retry_join": [
+                - |
+                - !Sub "\"provider=aws tag_key=Name tag_value=${EnvironmentName}-ConsulServer\""
+                - "]}\nEOF\n"
+                - !Sub "/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource WebModuleLaunchTemplate --configsets full_install --region ${AWS::Region}\n" 
+                - !Sub "/opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource WebModuleAutoScalingGroup --region ${AWS::Region}\n"
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          full_install:
+            - install_and_enable_cfn_hup
+            - install_consul_agent
+            - set_app_environment
+        install_and_enable_cfn_hup:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Join
+                - ''
+                - - "[main]\n"
+                  - stack=
+                  - !Ref 'AWS::StackId'
+                  - "\n"
+                  - region=
+                  - !Ref 'AWS::Region'
+                  - "\n"
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Join
+                - ''
+                - - "[cfn-auto-reloader-hook]\n"
+                  - "triggers=post.update\n"
+                  - "path=Resources.WebModuleLaunchTemplate.Metadata.AWS::CloudFormation::Init\n"
+                  - 'action=/opt/aws/bin/cfn-init -v '
+                  - '         --stack '
+                  - !Ref 'AWS::StackName'
+                  - '         --resource WebModuleLaunchTemplate '
+                  - '         --configsets full_install '
+                  - '         --region '
+                  - !Ref 'AWS::Region'
+                  - "\n"
+                  - "runas=root\n"
+            /lib/systemd/system/cfn-hup.service:
+              content: !Join
+                - ''
+                - - "[Unit]\n"
+                  - "Description=cfn-hup daemon\n\n"
+                  - "[Service]\n"
+                  - "Type=simple\n"
+                  - "ExecStart=/opt/aws/bin/cfn-hup\n"
+                  - "Restart=always\n\n"
+                  - "[Install]\n"
+                  - WantedBy=multi-user.target
+          commands:
+            '01enable_cfn_hup':
+              command: systemctl enable cfn-hup.service
+            '02start_cfn_hup':
+              command: systemctl start cfn-hup.service
+        install_consul_agent:
+          files:
+            /lib/systemd/system/consul.service:
+              content:
+                Fn::Join:
+                  - ''
+                  - - !Sub |
+                      [Unit]
+                      Description=consul service
+                      ConditionPathExists=/opt/consul/
+                      After=network.target
+
+                      [Service]
+                      Type=simple
+                      User=consulservice
+                      Group=consulservice
+                      LimitNOFILE=65536
+
+                      Restart=on-failure
+                      RestartSec=30
+
+                      WorkingDirectory=/opt/consul
+
+                      # make sure log exists and owned by syslog
+                      PermissionsStartOnly=true
+                      EnvironmentFile=/etc/app-environment
+                      ExecStart=/opt/consul/consul agent -data-dir=/opt/consul/consul_data/ -config-file=/opt/consul/config/consul-agent.json
+
+                      [Install]
+                      WantedBy=multi-user.target
+              commands:
+                '01enable_consul':
+                  command: systemctl enable consul.service
+                '02start_consul':
+                  command: systemctl start consul.service
+        set_app_environment:
+          files:
+            /tmp/cwlogs/webmoduleservice.conf:
+              content: !Sub |
+                [general]
+                state_file= /var/awslogs/agent-state
+                [/var/log/webmoduleservice.log]
+                file = /var/log/webmoduleservice.log
+                log_group_name = ${WebModuleServerLogGroup}
+                log_stream_name = {instance_id}/webmoduleservice.log
+                [/var/log/gcdleaser.log]
+                file = /var/log/gcdleaser.log
+                log_group_name = ${WebModuleServerLogGroup}
+                log_stream_name = {instance_id}/gcdleaser.log
+              mode: '000400'
+              owner: webmoduleservice
+              group: webmoduleservice
+            /etc/logrotate.d/webmoduleservice:
+              owner: "root"
+              group: "root"
+              content:
+                Fn::Join:
+                  - ''
+                  - - !Sub |
+                      /var/log/webmoduleservice.log
+                      {
+                        su root root
+                        rotate 1
+                        daily
+                        missingok
+                        notifempty
+                        delaycompress
+                        compress
+                        postrotate
+                                invoke-rc.d rsyslog rotate > /dev/null
+                        endscript
+                      }
+            /etc/rsyslog.d/30-webmoduleservice.conf:
+              owner: "root"
+              group: "root"
+              content:
+                Fn::Join:
+                  - ''
+                  - - !Sub |
+                      :programname, isequal, "webmoduleservice"    /var/log/webmoduleservice.log
+                      & stop
+            /etc/rsyslog.d/31-gcdleaser.conf:
+              owner: "root"
+              group: "root"
+              content:
+                Fn::Join:
+                  - ''
+                  - - !Sub |
+                      :programname, isequal, "gcdleaser"    /var/log/gcdleaser.log
+                      & stop
+            /lib/systemd/system/gcdleaser.service:
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              content: 
+                Fn::Join:
+                  - ''
+                  - - !Sub |
+                      [Unit]
+                      Description=gcdleaser service
+                      ConditionPathExists=/home/webuser/
+                      After=network.target
+
+                      [Service]
+                      Type=simple
+                      User=webuser
+                      Group=webuser
+                      LimitNOFILE=80000
+
+                      Restart=on-failure
+                      RestartSec=30
+
+                      WorkingDirectory=/home/webuser
+
+                      # make sure log exists and owned by syslog
+                      PermissionsStartOnly=true
+                      ExecStartPre=/bin/touch /var/log/gcdleaser.log
+                      ExecStartPre=/bin/chown syslog:adm /var/log/gcdleaser.log
+                      ExecStartPre=/bin/chmod 755 /var/log/gcdleaser.log
+                      ExecStart=/home/webuser/gcdleaser
+                      StandardOutput=syslog
+                      StandardError=syslog
+                      SyslogIdentifier=gcdleaser
+
+                      [Install]
+                      WantedBy=multi-user.target
+            /lib/systemd/system/webmoduleservice.service:
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              content: 
+                Fn::Join:
+                  - ''
+                  - - !Sub |
+                      [Unit]
+                      Description=webmodule service
+                      ConditionPathExists=/opt/webmodule/
+                      After=network.target
+
+                      [Service]
+                      Type=simple
+                      User=webmoduleservice
+                      Group=webmoduleservice
+                      LimitNOFILE=65536
+
+                      Restart=on-failure
+                      RestartSec=30
+
+                      WorkingDirectory=/opt/webmodule
+
+                      # make sure log exists and owned by syslog
+                      PermissionsStartOnly=true
+                      EnvironmentFile=/etc/app-environment
+                      ExecStartPre=/bin/touch /var/log/webmoduleservice.log
+                      ExecStartPre=/bin/chown syslog:adm /var/log/webmoduleservice.log
+                      ExecStartPre=/bin/chmod 755 /var/log/webmoduleservice.log
+                      ExecStartPre=/bin/bash -c "/bin/systemctl set-environment APP_ADDR=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4):50051"
+                      ExecStart=/opt/webmodule/webmoduleservice
+                      StandardOutput=syslog
+                      StandardError=syslog
+                      SyslogIdentifier=webmoduleservice
+
+                      [Install]
+                      WantedBy=multi-user.target
+            /etc/app-environment:
+              content: !Join
+                - ''
+                - - "APP_REGION="
+                  - !Ref 'AWS::Region'
+                  - "\n"
+                  - !Sub "APP_ENV=${EnvironmentName}"
+                  - "\n"
+                  - "APP_SELF_REGISTER=true"
+          commands:
+            '01enable_gcdleaser':
+              command: systemctl enable gcdleaser.service
+            '02enable_webmodule':
+              command: systemctl enable webmoduleservice.service
+            '03restart_syslog':
+              command: systemctl restart syslog
+            '04start_gcdleaser':
+              command: systemctl start gcdleaser.service
+            '05start_webmodule':
+              command: systemctl start webmoduleservice.service
+            '06enable_consul':
+              command: systemctl enable consul.service
+            '07start_consul':
+              command: systemctl start consul.service
+            '08enable_cloudwatch':
+              command: !Sub "wget https://s3.amazonaws.com/aws-cloudwatch/downloads/latest/awslogs-agent-setup.py && python awslogs-agent-setup.py -n -r ${AWS::Region} -c /tmp/cwlogs/webmoduleservice.conf"
+
+  WebModuleAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MixedInstancesPolicy:
+        InstancesDistribution:
+          OnDemandBaseCapacity: !If [IsProduction, 1, 0]
+          OnDemandPercentageAboveBaseCapacity: !If [IsProduction, 10, 0]
+          SpotInstancePools: 2
+          SpotMaxPrice: !If [IsProduction, 0.035, 0.02]
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref WebModuleLaunchTemplate
+            Version: !GetAtt WebModuleLaunchTemplate.LatestVersionNumber
+          Overrides:
+            - InstanceType: !If [IsProduction, t2.small, t2.small]
+            - InstanceType: !If [IsProduction, c4.large, t2.medium]
+      VPCZoneIdentifier: 
+        - Fn::ImportValue:
+            !Sub "${EnvironmentName}-PublicSubnets"
+      MinSize: !If [IsProduction, 8, !Ref WebModuleNumInstances]
+      MaxSize: !If [IsProduction, 10, !Ref WebModuleNumInstances]
+      DesiredCapacity: !If [IsProduction, 8, !Ref WebModuleNumInstances]
+      Tags:
+      - Key: Name
+        Value: !Sub "${EnvironmentName}-webmoduleservice-autoscaling-group"
+        PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        PauseTime: PT30M
+        WaitOnResourceSignals: true
+
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    DependsOn:
+      - WebModuleAutoScalingGroup
+      - ScaleUpPolicy
+    Properties:
+      AlarmDescription: Scale-up if CPU > 60% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '2'
+      Threshold: '60'
+      AlarmActions:
+      - Ref: ScaleUpPolicy
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value:
+          Ref: WebModuleAutoScalingGroup
+      ComparisonOperator: GreaterThanThreshold
+
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    DependsOn:
+      - WebModuleAutoScalingGroup
+      - ScaleDownPolicy
+    Properties:
+      AlarmDescription: Scale-down if CPU < 30% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '2'
+      Threshold: '30'
+      AlarmActions:
+      - Ref: ScaleDownPolicy
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value:
+          Ref: WebModuleAutoScalingGroup
+      ComparisonOperator: LessThanThreshold
+
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    DependsOn:
+      - WebModuleAutoScalingGroup
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: WebModuleAutoScalingGroup
+      Cooldown: 300
+      ScalingAdjustment: '1'
+
+  ScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    DependsOn:
+      - WebModuleAutoScalingGroup
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: WebModuleAutoScalingGroup
+      Cooldown: 1800
+      ScalingAdjustment: "-1"

@@ -1,0 +1,74 @@
+Description: >
+    This template deploys the Hakken AM frontend API stack.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+      - dev
+      - qa
+      - prod
+    Type: String
+  S3BucketPrefix:
+    Type: String
+    Default: 'linkai-infra'
+
+Resources:
+  ConsoleAPIRoles:
+    Type: AWS::CloudFormation::Stack 
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-api-roles.yaml'
+      TimeoutInMinutes: '10'
+  
+  ConsoleAPIGateway:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [ConsoleAPIRoles]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        S3BucketPrefix: !Ref S3BucketPrefix
+        UnAuthIdentityPoolRole: !GetAtt [ConsoleAPIRoles, Outputs.UnAuthIdentityPoolRole]
+        AuthIdentityPoolRole: !GetAtt [ConsoleAPIRoles, Outputs.AuthIdentityPoolRole]
+        InternalAdminRole: !GetAtt [ConsoleAPIRoles, Outputs.InternalAdminRole]
+        InternalReviewRole: !GetAtt [ConsoleAPIRoles, Outputs.InternalReviewRole]
+        APIOrgGroupRoles: !GetAtt [ConsoleAPIRoles, Outputs.APIOrgGroupRoles]
+        OwnerOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.OwnerOrgRole]
+        AdminOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.AdminOrgRole]
+        AuditorOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.AuditorOrgRole]
+        EditorOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.EditorOrgRole]
+        ReviewerOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.ReviewerOrgRole]
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-console-api.yaml'
+      TimeoutInMinutes: '10'
+  
+  ConsoleAPIPolicies:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [ConsoleAPIGateway, ConsoleAPIRoles]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        InternalAdminRole: !GetAtt [ConsoleAPIRoles, Outputs.InternalAdminRole]
+        InternalReviewRole: !GetAtt [ConsoleAPIRoles, Outputs.InternalReviewRole]
+        OwnerOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.OwnerOrgRole]
+        AdminOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.AdminOrgRole]
+        AuditorOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.AuditorOrgRole]
+        EditorOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.EditorOrgRole]
+        ReviewerOrgRole: !GetAtt [ConsoleAPIRoles, Outputs.ReviewerOrgRole]
+        ConsoleRestApi: !GetAtt [ConsoleAPIGateway, Outputs.ConsoleRestApi]
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-api-policies.yaml'
+      TimeoutInMinutes: '10'
+
+  SupportOrgProvision:
+    Type: AWS::CloudFormation::Stack 
+    DependsOn: [ConsoleAPIPolicies]
+    Properties:
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        InternalAdminRole: !GetAtt [ConsoleAPIRoles, Outputs.InternalAdminRole]
+        InternalReviewRole: !GetAtt [ConsoleAPIRoles, Outputs.InternalReviewRole]
+        UnAuthIdentityPoolRole: !GetAtt [ConsoleAPIRoles, Outputs.UnAuthIdentityPoolRole]
+        AuthIdentityPoolRole: !GetAtt [ConsoleAPIRoles, Outputs.AuthIdentityPoolRole]
+      TemplateURL: !Sub 'https://s3.amazonaws.com/linkai-infra/templates/am-support-org-task.yaml'
+      TimeoutInMinutes: '10'
+  

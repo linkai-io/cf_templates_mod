@@ -1,0 +1,1819 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template deploys the dashboard api gateway.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Type: String
+  HostedZoneId:
+    Type: String
+    Default: 'XXX' # the linkai.io hosted zone id
+  DomainName:
+    Type: String
+    Default: 'console.linkai.io'
+  S3BucketPrefix:
+    Type: String
+    Default: 'linkai-infra'
+  UnAuthIdentityPoolRole:
+    Description: Unauthenticated identity role
+    Type: String
+  AuthIdentityPoolRole:
+    Description: Authenticated identity role
+    Type: String
+  InternalAdminRole:
+    Description: Internal admin role
+    Type: String
+  InternalReviewRole:
+    Description: Internal reviewer role
+    Type: String
+  APIOrgGroupRoles:
+    Description: Comma seperated list of api org role arns
+    Type: String
+  OwnerOrgRole:
+    Description: Owner of organization role
+    Type: String
+  AdminOrgRole:
+    Description: Admin of organization role
+    Type: String
+  AuditorOrgRole:
+    Description: Auditor of organization role
+    Type: String  
+  EditorOrgRole:
+    Description: Editor of organization role
+    Type: String
+  ReviewerOrgRole:
+    Description: Reviewer of organization role
+    Type: String
+
+Mappings:
+  DomainMap:
+    dev:
+      Domain: "dev.console.linkai.io"
+    prod:
+      Domain: "console.linkai.io" 
+    qa: 
+      Domain: "qa.console.linkai.io"
+
+  UrlMap:
+    dev:
+      URL: "https://dev.console.linkai.io/*"
+    prod: 
+      URL: "https://console.linkai.io/*"
+    qa:
+      URL: "https://qa.console.linkai.io/*"
+  
+Resources:
+  PrivateConsoleCookieHashKey:
+    Type: Custom::Secret
+    Properties:
+      Description: 'Hash Key to validate cookie values to allow access to private static content'
+      Name: !Sub '/am/${EnvironmentName}/frontend/console/cookie/hashkey'
+      Length: 64
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+ 
+  PrivateConsoleCookieBlockKey:
+    Type: Custom::Secret 
+    Properties:
+      Name: !Sub '/am/${EnvironmentName}/frontend/console/cookie/blockkey'
+      Description: 'Block key to encrypt cookie values to allow access to private static content'
+      Length: 32
+      ReturnSecret: true
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-secret-provider'
+
+  PublicConsoleBucketPolicy: 
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: linkai-console
+      PolicyDocument: 
+        Statement: 
+          - 
+            Action: 
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource: !Sub 'arn:aws:s3:::linkai-console/dev/public/*'
+            Principal:
+                Service: "apigateway.amazonaws.com"
+
+  PublicConsoleStaticRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Policies:
+        - PolicyName: !Sub '${EnvironmentName}-public-login-policy'
+          PolicyDocument:
+            Statement:
+              - Action:
+                  - 's3:GetObject'
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:s3:::linkai-console/${EnvironmentName}/public/*'
+                  - !Sub 'arn:aws:s3:::linkai-console/${EnvironmentName}/private/index.html'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+
+  PrivateConsoleBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: linkai-console
+      PolicyDocument: 
+        Statement: 
+          - 
+            Action: 
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource: !Sub 'arn:aws:s3:::linkai-console/dev/private/*'
+            Principal:
+                Service: "apigateway.amazonaws.com"
+
+  PrivateConsoleStaticRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Policies:
+        - PolicyName: !Sub '${EnvironmentName}-private-console-app-policy'
+          PolicyDocument:
+            Statement:
+              - Action:
+                  - 's3:GetObject'
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:s3:::linkai-console/${EnvironmentName}/private/*'
+                  - !Sub 'arn:aws:s3:::${EnvironmentName}-linkai-webdata/*'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+
+  ConsoleCertificate:
+    Type: Custom::Certificate
+    Properties:
+      DomainName: !FindInMap
+        - DomainMap
+        - !Ref 'EnvironmentName'
+        - Domain
+      ValidationMethod: DNS
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-certificate-provider'
+
+  ConsoleIssuedCertificate:
+    Type: Custom::IssuedCertificate
+    Properties:
+      CertificateArn: !Ref ConsoleCertificate
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-certificate-provider'
+
+  ConsoleCertificateDNSRecord:
+    Type: Custom::CertificateDNSRecord
+    Properties:
+      CertificateArn: !Ref ConsoleCertificate
+      DomainName: !FindInMap
+        - DomainMap
+        - !Ref 'EnvironmentName'
+        - Domain
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:linkai-cfn-certificate-provider'
+
+  ConsoleDomainValidationRecord:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !GetAtt ConsoleCertificateDNSRecord.Name
+          Type: !GetAtt ConsoleCertificateDNSRecord.Type
+          TTL: 60
+          Weight: 1
+          SetIdentifier: !Ref ConsoleCertificate
+          ResourceRecords:
+            - !GetAtt ConsoleCertificateDNSRecord.Value
+
+  ConsoleSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Allows lambdas to access backend services'
+      GroupName: !Sub '${EnvironmentName}-console-api-egress-sg'
+      VpcId:
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: purpose
+          Value: allow console api lambdas access to services
+
+  DefaultConsoleManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Default managed policy for all front end console lambdas 
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'ec2:AttachNetworkInterface'
+              - 'ec2:CreateNetworkInterface'
+              - 'ec2:CreateNetworkInterfacePermission'
+              - 'ec2:DeleteNetworkInterface'
+              - 'ec2:DeleteNetworkInterfacePermission'
+              - 'ec2:Describe*'
+              - 'ec2:DetachNetworkInterface'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: 
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/system/*"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-*"
+
+  DefaultConsoleHandlerRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      ManagedPolicyArns: 
+        - !Ref DefaultConsoleManagedPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["lambda.amazonaws.com", "apigateway.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+
+  LambdaAuthorizerRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      ManagedPolicyArns: 
+        - !Ref DefaultConsoleManagedPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["lambda.amazonaws.com", "apigateway.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+      Policies:
+        - PolicyName: !Sub '${EnvironmentName}-console-handler-lambda-authorizer'
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "cognito-identity:*"
+                - "cognito-idp:*"
+                - "cognito-sync:*"
+                - "iam:ListRoles"
+                - "iam:ListRolePolicies"
+                - "iam:GetRolePolicy"
+                - "iam:ListOpenIdConnectProviders"
+                - "sns:ListPlatformApplications"
+              Resource:
+                - '*'
+
+  LambdaAuthorizerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: !Sub '${EnvironmentName} Console API Lambda Authorizer'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/authorizer/lambda_authorizer.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-lambda-authorizer'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'LambdaAuthorizerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+          unauthenticated: !Sub '${UnAuthIdentityPoolRole}'
+          authenticated: !Sub '${AuthIdentityPoolRole}'
+          internal_owner: !Sub '${InternalAdminRole}'
+          internal_admin: !Sub '${InternalAdminRole}'
+          internal_reviewer: !Sub '${InternalReviewRole}'
+          owner: !Sub '${OwnerOrgRole}'
+          admin: !Sub '${AdminOrgRole}' 
+          auditor: !Sub '${AuditorOrgRole}'
+          editor: !Sub '${EditorOrgRole}'
+          reviewer: !Sub '${ReviewerOrgRole}'
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  StaticContentAuthorizerRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      ManagedPolicyArns: 
+        - !Ref DefaultConsoleManagedPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["lambda.amazonaws.com", "apigateway.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+
+  StaticContentAuthorizerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: !Sub '${EnvironmentName} Console Static Content Authorizer'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/staticauthorizer/static_authorizer.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-static-authorizer'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'StaticContentAuthorizerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}'
+          APP_REGION: !Sub '${AWS::Region}'
+          APP_ACCOUNTID: !Sub '${AWS::AccountId}' 
+          #APP_RESTAPI: !Ref ConsoleRestApi circular dep, for now we set to * all api's ...
+          APP_HASHKEY: !GetAtt PrivateConsoleCookieHashKey.Secret # this isn't super secret data so just pass it via env vars
+          APP_BLOCKKEY: !GetAtt PrivateConsoleCookieBlockKey.Secret
+
+  AuthConsoleHandlerRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      ManagedPolicyArns: 
+        - !Ref DefaultConsoleManagedPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["lambda.amazonaws.com", "apigateway.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+      Policies:
+        - PolicyName: !Sub '${EnvironmentName}-console-handler-auth-cognito'
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "cognito-identity:*"
+                - "cognito-idp:*"
+                - "cognito-sync:*"
+                - "iam:ListRoles"
+                - "iam:ListOpenIdConnectProviders"
+                - "sns:ListPlatformApplications"
+              Resource:
+                - '*'
+        - PolicyName: !Sub '${EnvironmentName}-console-handler-auth-ssm'
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: 
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/frontend/console/cookie/*"
+
+  AuthFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: [AuthConsoleHandlerRole, DefaultConsoleManagedPolicy]
+    Properties:
+      Description: !Sub '${EnvironmentName} Authentication Service Handler'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/console/auth_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-auth'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'AuthConsoleHandlerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          APP_HASHKEY: !GetAtt PrivateConsoleCookieHashKey.Secret # this isn't super secret data so just pass it via env vars
+          APP_BLOCKKEY: !GetAtt PrivateConsoleCookieBlockKey.Secret 
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  DefaultConsoleHandlerRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      ManagedPolicyArns: 
+        - !Ref DefaultConsoleManagedPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["lambda.amazonaws.com", "apigateway.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+
+  OrgFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - DefaultConsoleHandlerRole
+    Properties:
+      Description: !Sub '${EnvironmentName} Org Service Handler'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/console/org_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-orgservice'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'DefaultConsoleHandlerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  UserFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - DefaultConsoleHandlerRole
+    Properties:
+      Description: !Sub '${EnvironmentName} User Service Handler'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/console/user_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-userservice'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'DefaultConsoleHandlerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  EventConsoleHandlerRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      ManagedPolicyArns: 
+        - !Ref DefaultConsoleManagedPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["lambda.amazonaws.com", "apigateway.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+      Policies:
+        - PolicyName: !Sub '${EnvironmentName}-console-event-execute-webhook-function'
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-function-event-webhooks"
+      
+  EventFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - EventConsoleHandlerRole
+    Properties:
+      Description: !Sub '${EnvironmentName} Event Service Handler'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/console/event_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-eventservice'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'EventConsoleHandlerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  ScanGroupFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - DefaultConsoleHandlerRole
+    Properties:
+      Description: !Sub '${EnvironmentName} ScanGroup Service Handler'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/console/scangroup_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-scangroupservice'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'DefaultConsoleHandlerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  AddressFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - DefaultConsoleHandlerRole
+    Properties:
+      Description: !Sub '${EnvironmentName} Address Service Handler'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/console/address_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-addressservice'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'DefaultConsoleHandlerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  WebDataFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - DefaultConsoleHandlerRole
+    Properties:
+      Description: !Sub '${EnvironmentName} Web Data Service Handler'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/console/webdata_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-webdataservice'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'DefaultConsoleHandlerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  AdminFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - DefaultConsoleHandlerRole
+    Properties:
+      Description: !Sub '${EnvironmentName} Admin Service Handler'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: 'frontend/lambdas/console/admin/admin_handler.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler-admin'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'DefaultConsoleHandlerRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+          CONSUL_HTTP_ADDR: 
+            Fn::ImportValue: 
+              !Sub "${EnvironmentName}-ConsulServerAddr"
+          unauthenticated: !Sub '${UnAuthIdentityPoolRole}'
+          authenticated: !Sub '${AuthIdentityPoolRole}'
+          owner: !Sub '${OwnerOrgRole}'
+          admin: !Sub '${AdminOrgRole}' 
+          auditor: !Sub '${AuditorOrgRole}'
+          editor: !Sub '${EditorOrgRole}'
+          reviewer: !Sub '${ReviewerOrgRole}'
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ConsoleSecurityGroup
+        SubnetIds:
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet1'}
+          - {'Fn::ImportValue' : !Sub '${EnvironmentName}-PrivateSubnet2'}
+
+  AdminConsolePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn:
+      - DefaultConsoleHandlerRole
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-support-admin-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - "iam:GetRole"
+              - "iam:PassRole"
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/hakken-${EnvironmentName}-frontend*"
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/system/*"
+          - Effect: Allow
+            Action:
+              - "cognito-identity:*"
+              - "cognito-idp:*"
+              - "cognito-sync:*"
+              - "iam:ListRoles"
+              - "iam:ListOpenIdConnectProviders"
+              - "sns:ListPlatformApplications"
+            Resource:
+              - '*'
+          - Action:
+              - logs:*
+            Resource: arn:aws:logs:*:*:*
+            Effect: Allow
+      Roles:
+        - !Ref 'DefaultConsoleHandlerRole'
+
+  ConsoleAPIGatewayLambdaRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "apigateway.amazonaws.com"
+          Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: !Sub '${EnvironmentName}-console-handler-invoke'
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - 'lambda:InvokeFunction'
+              Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-console-handler*'
+
+  ConsoleRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${EnvironmentName} Console API"
+      Body:
+        swagger: '2.0'
+        info:
+          version: '2017-04-20T04:08:08Z'
+          title: ConsoleAPI
+        basePath: "/"
+        schemes:
+        - https
+        x-amazon-apigateway-gateway-responses:
+          MISSING_AUTHENTICATION_TOKEN:
+            statusCode: 401
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+              gatewayresponse.header.Location: "'/login/'"
+            responseTemplates:
+              application/json: |
+                {
+                  "status": "error",
+                  "message": "$context.authorizer.errorMsg"
+                }
+              text/html: |
+                <!doctype html><head><script>window.location='/login/'; </script></head><body>expired</body></html>
+          EXPIRED_TOKEN:
+            statusCode: 403
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+              gatewayresponse.header.Location: "'/login/'"
+            responseTemplates:
+              application/json: |
+                {
+                  "status": "error",
+                  "message": "$context.authorizer.errorMsg"
+                }
+              text/html: |
+                <!doctype html><head><script>window.location='/login/'; </script></head><body>expired</body></html>
+          UNAUTHORIZED:
+            statusCode: 401
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+              gatewayresponse.header.Location: "'/login/'"
+            responseTemplates:
+              application/json: |
+                {
+                  "status": "error",
+                  "message": "$context.authorizer.errorMsg"
+                }
+              text/html: |
+                <!doctype html><head><script>window.location='/login/'; </script></head><body>expired</body></html>
+          ACCESS_DENIED:
+            statusCode: 403
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+              gatewayresponse.header.Location: "'/login/'"
+            responseTemplates:
+              application/json: |
+                {
+                  "status": "error",
+                  "message": "$context.authorizer.errorMsg"
+                }
+              text/html: |
+                <!doctype html><head><script>window.location='/login/'; </script></head><body>expired</body></html>
+        x-amazon-apigateway-binary-media-types: [ "*/*" ]
+        paths: 
+          "/app/":
+            get:
+              security:
+                - StaticAuthorizer: []
+              produces:
+                - application/json
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+                  headers:
+                    Content-Length:
+                      type: string
+                    Date:
+                      type: string
+                    Content-Type:
+                      type: string
+                '400':
+                  description: 400 response
+                '500':
+                  description: 500 response
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt PrivateConsoleStaticRole.Arn
+                responses:
+                  4\d{2}:
+                    statusCode: '400'
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.Content-Type: integration.response.header.Content-Type
+                      method.response.header.Date: integration.response.header.Date
+                      method.response.header.Content-Length: integration.response.header.content-length
+                  5\d{2}:
+                    statusCode: '500'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:s3:path/linkai-console/${EnvironmentName}/private/index.html'
+                passthroughBehavior: when_no_match
+                httpMethod: GET
+                type: aws
+          "/app/{folder}":
+            get:
+              security:
+                - StaticAuthorizer: []
+              produces:
+                - application/json
+              parameters:
+                - name: folder
+                  in: path
+                  required: true
+                  type: string
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+                  headers:
+                    Content-Length:
+                      type: string
+                    Date:
+                      type: string
+                    Content-Type:
+                      type: string
+                '400':
+                  description: 400 response
+                  content: text/html
+                '500':
+                  description: 500 response
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt PrivateConsoleStaticRole.Arn
+                responses:
+                  4\d{2}:
+                    statusCode: '400'
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.Content-Type: integration.response.header.Content-Type
+                      method.response.header.Date: integration.response.header.Date
+                      method.response.header.Content-Length: integration.response.header.content-length
+                  5\d{2}:
+                    statusCode: '500'
+                requestParameters:
+                  integration.request.path.folder: method.request.path.folder
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:s3:path/linkai-console/${EnvironmentName}/private/{folder}'
+                passthroughBehavior: when_no_match
+                httpMethod: GET
+                type: aws
+          "/app/{folder}/{item}":
+            get:
+              security:
+                - StaticAuthorizer: []
+              produces:
+                - application/json
+              parameters:
+                - name: item
+                  in: path
+                  required: true
+                  type: string
+                - name: folder
+                  in: path
+                  required: true
+                  type: string
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+                  headers:
+                    content-type:
+                      type: string
+                    Content-Type:
+                      type: string
+                '400':
+                  description: 400 response
+                  content: text/html
+                '500':
+                  description: 500 response
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt PrivateConsoleStaticRole.Arn
+                responses:
+                  4\d{2}:
+                    statusCode: '400'
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.content-type: integration.response.header.content-type
+                      method.response.header.Content-Type: integration.response.header.Content-Type
+                  5\d{2}:
+                    statusCode: '500'
+                requestParameters:
+                  integration.request.path.folder: method.request.path.folder
+                  integration.request.path.item: method.request.path.item
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:s3:path/linkai-console/${EnvironmentName}/private/{folder}/{item}'
+                passthroughBehavior: when_no_match
+                httpMethod: GET
+                type: aws
+          "/app/img/tech/{item}":
+            get:
+              security:
+                - StaticAuthorizer: []
+              produces:
+                - image/*
+              parameters:
+                - name: item
+                  in: path
+                  required: true
+                  type: string
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+                  headers:
+                    content-type:
+                      type: string
+                    Content-Type:
+                      type: string
+                '400':
+                  description: 400 response
+                  content: text/html
+                '500':
+                  description: 500 response
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt PrivateConsoleStaticRole.Arn
+                responses:
+                  4\d{2}:
+                    statusCode: '400'
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.content-type: integration.response.header.content-type
+                      method.response.header.Content-Type: integration.response.header.Content-Type
+                  5\d{2}:
+                    statusCode: '500'
+                requestParameters:
+                  integration.request.path.item: method.request.path.item
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:s3:path/linkai-console/${EnvironmentName}/private/img/tech/{item}'
+                passthroughBehavior: when_no_match
+                httpMethod: GET
+                type: aws
+          "/app/data/{object+}":
+            get:
+              security:
+                - StaticAuthorizer: []
+              produces:
+                - application/json
+              parameters:
+                - name: object
+                  in: path
+                  required: true
+                  type: string
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+                  headers:
+                    content-type:
+                      type: string
+                    Content-Type:
+                      type: string
+                '400':
+                  description: 400 response
+                '500':
+                  description: 500 response
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt PrivateConsoleStaticRole.Arn
+                responses:
+                  4\d{2}:
+                    statusCode: '400'
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.content-type: integration.response.header.content-type
+                      method.response.header.Content-Type: integration.response.header.Content-Type
+                  5\d{2}:
+                    statusCode: '500'
+                requestParameters:
+                  integration.request.path.object: method.request.path.object
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:s3:path/${EnvironmentName}-linkai-webdata/{object}'
+                passthroughBehavior: when_no_match
+                httpMethod: GET
+                type: aws
+          "/org/{proxy+}":
+            post:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrgFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            get:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrgFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            patch:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrgFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"     
+            delete:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-auth:
+                type: aws_iam
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrgFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+          "/user/{proxy+}":
+            post:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            get:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            patch:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"     
+          "/event/{proxy+}":
+            get:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${EventFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            post:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${EventFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            patch:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${EventFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+          "/scangroup/{proxy+}":
+            post:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScanGroupFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            get:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScanGroupFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            patch:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScanGroupFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"     
+            delete:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-auth:
+                type: aws_iam
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScanGroupFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+          "/address/{proxy+}":
+            put:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddressFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            post:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddressFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            get:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddressFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            patch:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddressFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"     
+            delete:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-auth:
+                type: aws_iam
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddressFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+          "/webdata/{proxy+}":
+            post:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebDataFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            get:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebDataFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            patch:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebDataFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"     
+            delete:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-auth:
+                type: aws_iam
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebDataFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+          "/admin/{proxy+}":
+            post:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdminFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            get:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdminFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST" 
+            patch:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-auth:
+                type: aws_iam
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdminFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"     
+            delete:
+              security:
+                - LambdaAuthorizer: []
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-auth:
+                type: aws_iam
+              x-amazon-apigateway-integration:
+                passthroughBehavior: "never"
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdminFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"  
+          "/login/": # START UNAUTHENTICATED RESOURCES
+            get:
+              produces:
+                - application/json
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+                  headers:
+                    Content-Length:
+                      type: string
+                    Date:
+                      type: string
+                    Content-Type:
+                      type: string
+                '400':
+                  description: 400 response
+                '500':
+                  description: 500 response
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt PublicConsoleStaticRole.Arn
+                responses:
+                  4\d{2}:
+                    statusCode: '400'
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.Content-Type: integration.response.header.Content-Type
+                      method.response.header.Date: integration.response.header.Date
+                      method.response.header.Content-Length: integration.response.header.content-length
+                  5\d{2}:
+                    statusCode: '500'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:s3:path/linkai-console/${EnvironmentName}/public/index.html'
+                passthroughBehavior: when_no_match
+                httpMethod: GET
+                type: aws
+          "/login/{folder}": 
+            get:
+              produces:
+                - application/json
+              parameters:
+                - name: folder
+                  in: path
+                  required: true
+                  type: string
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+                  headers:
+                    Content-Length:
+                      type: string
+                    Date:
+                      type: string
+                    Content-Type:
+                      type: string
+                '400':
+                  description: 400 response
+                '500':
+                  description: 500 response
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt PublicConsoleStaticRole.Arn
+                responses:
+                  4\d{2}:
+                    statusCode: '400'
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.Content-Type: integration.response.header.Content-Type
+                      method.response.header.Date: integration.response.header.Date
+                      method.response.header.Content-Length: integration.response.header.content-length
+                  5\d{2}:
+                    statusCode: '500'
+                requestParameters:
+                  integration.request.path.folder: method.request.path.folder
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:s3:path/linkai-console/${EnvironmentName}/public/{folder}'
+                passthroughBehavior: when_no_match
+                httpMethod: GET
+                type: aws
+          "/login/{folder}/{item}":
+            get:
+              produces:
+                - application/json
+              parameters:
+                - name: item
+                  in: path
+                  required: true
+                  type: string
+                - name: folder
+                  in: path
+                  required: true
+                  type: string
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+                  headers:
+                    content-type:
+                      type: string
+                    Content-Type:
+                      type: string
+                '400':
+                  description: 400 response
+                '500':
+                  description: 500 response
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt PublicConsoleStaticRole.Arn
+                responses:
+                  4\d{2}:
+                    statusCode: '400'
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.content-type: integration.response.header.content-type
+                      method.response.header.Content-Type: integration.response.header.Content-Type
+                  5\d{2}:
+                    statusCode: '500'
+                requestParameters:
+                  integration.request.path.folder: method.request.path.folder
+                  integration.request.path.item: method.request.path.item
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:s3:path/linkai-console/${EnvironmentName}/public/{folder}/{item}'
+                passthroughBehavior: when_no_match
+                httpMethod: GET
+                type: aws
+          "/auth/{proxy+}":
+            post:
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                passthroughBehavior: "never"
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+            get:
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: proxy
+                in: path
+                required: true
+                type: string
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt 'ConsoleAPIGatewayLambdaRole.Arn'
+                passthroughBehavior: "never"
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations'
+                type: aws_proxy
+                httpMethod: "POST"
+        definitions:
+          Empty:
+            type: object
+            title: Empty Schema
+        securityDefinitions:
+          StaticAuthorizer:
+            type: "apiKey"
+            name: "Cookie"
+            in: "header"
+            x-amazon-apigateway-authtype: "custom"
+            x-amazon-apigateway-authorizer:
+              identitySource: "method.request.header.Cookie"
+              authorizerCredentials: !GetAtt StaticContentAuthorizerRole.Arn
+              authorizerResultTtlInSeconds: 300
+              authorizerUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StaticContentAuthorizerFunction.Arn}/invocations'
+              type: "request"
+          LambdaAuthorizer:
+            type: "apiKey"
+            name: "Authorization"
+            in: "header"
+            x-amazon-apigateway-authtype: "custom"
+            x-amazon-apigateway-authorizer:
+              authorizerCredentials: !GetAtt LambdaAuthorizerRole.Arn
+              authorizerResultTtlInSeconds: 300
+              authorizerUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaAuthorizerFunction.Arn}/invocations'
+              type: "token"
+
+  ConsoleStageApi:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref 'ConsoleDeployApi'
+      Description: !Join
+        - ''
+        - - !Sub '${EnvironmentName} Landing Page'
+      RestApiId: !Ref 'ConsoleRestApi'
+      StageName: !Ref EnvironmentName
+  
+  ConsoleDeployApi:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      Description: !Join
+        - ''
+        - - !Sub '${EnvironmentName} Landing Page'
+      RestApiId: !Ref 'ConsoleRestApi'
+      StageName: DummyStage
+
+  ConsoleDomainName:
+    Type: AWS::ApiGateway::DomainName
+    DependsOn: ["ConsoleCertificate", "ConsoleIssuedCertificate"]
+    Properties: 
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      DomainName: !FindInMap
+        - DomainMap
+        - !Ref 'EnvironmentName'
+        - Domain
+      RegionalCertificateArn: !Ref ConsoleCertificate
+
+  ConsoleDomainMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    DependsOn: ["ConsoleStageApi", "ConsoleDomainName", "ConsoleCertificate", "ConsoleIssuedCertificate"]
+    Properties:
+      DomainName: !FindInMap
+        - DomainMap
+        - !Ref 'EnvironmentName'
+        - Domain
+      RestApiId: !Ref 'ConsoleRestApi'
+      Stage: !Ref EnvironmentName
+
+  ConsoleDomainCNAME:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+      - Name:
+          !FindInMap
+            - DomainMap
+            - !Ref 'EnvironmentName'
+            - Domain
+        ResourceRecords:
+        - !GetAtt ConsoleDomainName.RegionalDomainName
+        TTL: '300'
+        Type: CNAME
+
+# Keep lambdas warm (DUMB)
+  LambdaWarmerScheduledRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "ScheduledRuleToWarmLambdas"
+      ScheduleExpression: "rate(20 minutes)"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: !GetAtt LambdaAuthorizerFunction.Arn
+          Id: "AuthorizerPing"
+        - 
+          Arn: !GetAtt AuthFunction.Arn
+          Id: "AuthPing" 
+        - 
+          Arn: !GetAtt OrgFunction.Arn
+          Id: "OrgPing"
+  
+  WarmerAuthorizerInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref LambdaAuthorizerFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt LambdaWarmerScheduledRule.Arn
+
+  WarmerAuthInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref AuthFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt LambdaWarmerScheduledRule.Arn
+
+  WarmerOrgInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref OrgFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt LambdaWarmerScheduledRule.Arn
+  
+Outputs:
+  ConsoleRestApi:
+    Description: ConsoleRestApi
+    Value: !Ref 'ConsoleRestApi'
+    Export: 
+      Name: !Sub ${EnvironmentName}-ConsoleRestApi

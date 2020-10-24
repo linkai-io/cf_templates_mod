@@ -1,0 +1,40 @@
+Description: >
+    This template deploys the security group for remote worker access
+Parameters:
+    EnvironmentName:
+        Description: An environment name that will be prefixed to resource names
+        Default: dev 
+        AllowedValues: 
+            - dev
+            - qa
+            - prod
+        Type: String
+
+Resources:
+  RemoteWorkersGroupName:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-remote-workers-sg"
+      GroupDescription: Enable SSH access via port 22
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 126.218.240.84/32
+        - IpProtocol: tcp
+          FromPort: 8500
+          ToPort: 8500
+          CidrIp: 126.218.240.84/32
+      Tags:
+        - Key: purpose
+          Value: Allow remote workers ssh access
+
+Outputs:
+  RemoteWorkersSG:
+    Description: Remote workers security group
+    Value: !Ref RemoteWorkersGroupName
+    Export:
+      Name: !Sub ${EnvironmentName}-RemoteWorkersSG

@@ -1,0 +1,678 @@
+Description: >
+    This template deploys the ecs services for the hakken service
+  
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Default: dev 
+    AllowedValues: 
+        - dev
+        - qa
+        - prod
+    Type: String
+  S3BucketPrefix:
+    Type: String
+    Default: 'linkai-infra'
+
+Resources:
+  # orgservice task items
+  OrgServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-orgservice"
+
+  OrgServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-orgservice-query-dbstring"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/orgservice/dbstring"
+  
+  OrgServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: orgservice
+      TaskRoleArn: !GetAtt 'OrgServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: orgservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/orgservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-orgservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'orgservice'
+  
+  OrgServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'orgservice'
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'OrgServiceTaskDefinition'
+      SchedulingStrategy: 'DAEMON'
+
+  # user service task definitions
+  UserServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-userservice"
+
+  UserServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-userservice-query-dbstring"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/userservice/dbstring"
+  
+  UserServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: userservice
+      TaskRoleArn: !GetAtt 'UserServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: userservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/userservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-userservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'userservice'
+  
+  UserServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'userservice'
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'UserServiceTaskDefinition'
+      SchedulingStrategy: 'DAEMON'
+
+
+# scangroup service task definitions
+  ScanGroupServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-scangroupservice"
+
+  ScanGroupServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-scangroupservice-query-dbstring"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/scangroupservice/dbstring"
+  
+  ScanGroupServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: scangroupservice
+      TaskRoleArn: !GetAtt 'ScanGroupServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: scangroupservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/scangroupservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-scangroupservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'scangroupservice'
+  
+  ScanGroupServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'scangroupservice'
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'ScanGroupServiceTaskDefinition'
+      SchedulingStrategy: 'DAEMON'
+
+# address service task definitions
+  AddressServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-addressservice"
+
+  AddressServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-addressservice-query-dbstring"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/addressservice/dbstring"
+  
+  AddressServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: addressservice
+      TaskRoleArn: !GetAtt 'AddressServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: addressservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/addressservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-addressservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'addressservice'
+  
+  AddressServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'addressservice'
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'AddressServiceTaskDefinition'
+      SchedulingStrategy: 'DAEMON'
+
+  # webdata service task definitions
+  WebDataServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-webdataservice"
+
+  WebDataServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-webdataservice-query-dbstring"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/webdataservice/dbstring"
+  
+  WebDataServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: webdataservice
+      TaskRoleArn: !GetAtt 'WebDataServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: webdataservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/webdataservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-webdataservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'webdataservice'
+  
+  WebDataServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'webdataservice'
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'WebDataServiceTaskDefinition'
+      SchedulingStrategy: 'DAEMON'
+
+# event service task definitions
+  WebhookAppSenderRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["lambda.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+      Policies:
+        - PolicyName: !Sub '${EnvironmentName}-webhook-sender-logs'
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "logs:CreateLogGroup"
+                - "logs:CreateLogStream"
+                - "logs:PutLogEvents"
+              Resource:
+                - '*'
+
+  WebhookAppSenderFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: [WebhookAppSenderRole]
+    Properties:
+      Description: !Sub '${EnvironmentName} Webhook Sender Function'
+      Code:
+        S3Bucket: !Sub '${S3BucketPrefix}'
+        S3Key: !Sub '${EnvironmentName}/lambdas/webhook_sender.zip'
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-function-event-webhooks'
+      Handler: main
+      MemorySize: 128
+      Timeout: 45
+      Role: !GetAtt 'WebhookAppSenderRole.Arn'
+      Runtime: go1.x
+      Environment:
+        Variables:
+          APP_ENV: !Sub '${EnvironmentName}' 
+          APP_REGION: !Sub '${AWS::Region}'
+
+  EventServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-eventservice"
+
+  EventServiceRole:
+    Type: AWS::IAM::Role
+    DependsOn: [WebhookAppSenderFunction]
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ["ecs-tasks.amazonaws.com", "lambda.amazonaws.com"]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-eventservice-query-dbstring"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/eventservice/dbstring"
+      - PolicyName: !Sub "${EnvironmentName}-eventservice-execute-function-event-webhooks"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-function-event-webhooks"
+  
+  EventServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: eventservice
+      TaskRoleArn: !GetAtt 'EventServiceRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: eventservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/eventservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-eventservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'eventservice'
+  
+  EventServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'eventservice'
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'EventServiceTaskDefinition'
+      SchedulingStrategy: 'DAEMON'
+
+  # bigdata service task definitions
+  BigDataServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-bigdataservice"
+
+  BigDataServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: !Sub "${EnvironmentName}-bigdataservice-query-dbstring"
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ssm:Describe*"
+              - "ssm:Get*"
+              - "ssm:List*"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/db/bigdataservice/dbstring"
+  
+  BigDataServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: bigdataservice
+      TaskRoleArn: !GetAtt 'BigDataServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: bigdataservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/bigdataservice:latest
+          Memory: 128
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-bigdataservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'bigdataservice'
+  
+  BigDataServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'bigdataservice'
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'BigDataServiceTaskDefinition'
+      SchedulingStrategy: 'DAEMON'
+
+  #dispatcher service
+  DispatcherServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-dispatcherservice"
+
+  DispatcherServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${EnvironmentName}-default-dispatcher-state"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/state/*"
+        - PolicyName: !Sub "${EnvironmentName}-dispatcher-read-scanner1-token"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/scanner1/token"
+  
+  DispatcherServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: dispatcherservice
+      TaskRoleArn: !GetAtt 'DispatcherServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: dispatcherservice
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/dispatcherservice:latest
+          Memory: 256
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-dispatcherservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'dispatcherservice'
+  
+  DispatcherServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'dispatcherservice'
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'DispatcherServiceTaskDefinition'
+      SchedulingStrategy: 'DAEMON'
+
+  #coordinator service
+  CoordinatorServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 3
+      LogGroupName: !Sub "${EnvironmentName}-backend-ecs-coordinatorservice"
+
+  CoordinatorServiceReadSSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: "ecs-tasks.amazonaws.com"
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${EnvironmentName}-default-coordinator-state"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/state/*"
+        - PolicyName: !Sub "${EnvironmentName}-default-coordinator-systemids"
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:Describe*"
+                - "ssm:Get*"
+                - "ssm:List*"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/am/${EnvironmentName}/system/*"
+  
+  CoordinatorServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: coordinatorservice-replica
+      TaskRoleArn: !GetAtt 'CoordinatorServiceReadSSMRole.Arn'
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: coordinatorservice-replica
+          Image: 447064213022.dkr.ecr.us-east-1.amazonaws.com/coordinatorservice:latest
+          Memory: 256
+          Essential: true
+          HealthCheck:
+            Command: ["CMD", "/bin/grpc_health_probe-linux-amd64","-addr=:50051"]
+            Retries: 6
+            Timeout: 5
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment: 
+            - Name: APP_ENV
+              Value: !Sub "${EnvironmentName}"
+            - Name: APP_REGION
+              Value: !Ref "AWS::Region"
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Sub "${EnvironmentName}-backend-ecs-coordinatorservice"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'coordinatorservice'
+  
+  CoordinatorServiceDaemon:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: 'coordinatorservice'
+      DesiredCount: 1
+      Cluster: !Sub "${EnvironmentName}-backend-ecs-cluster"
+      TaskDefinition: !Ref 'CoordinatorServiceTaskDefinition'
+      SchedulingStrategy: 'REPLICA'

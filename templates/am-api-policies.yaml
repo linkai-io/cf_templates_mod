@@ -1,0 +1,257 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template deploys the frontend console api policies to be applied to the roles.
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Type: String
+  ConsoleRestApi:
+    Description: Reference to the Rest API to assign roles to.
+    Type: String
+  InternalAdminRole:
+    Description: Internal admin role
+    Type: String
+  InternalReviewRole:
+    Description: Internal reviewer only role
+    Type: String
+  OwnerOrgRole:
+    Description: Owner of organization role
+    Type: String
+  AdminOrgRole:
+    Description: Admin of organization role
+    Type: String
+  AuditorOrgRole:
+    Description: Auditor of organization role
+    Type: String  
+  EditorOrgRole:
+    Description: Editor of organization role
+    Type: String
+  ReviewerOrgRole:
+    Description: Reviewer of organization role
+    Type: String
+
+Resources:
+  InternalAdminPolicy:
+    Type: AWS::IAM::Policy 
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-internaladmin-cognito-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: execute-api:Invoke
+          Effect: Allow
+          Resource:
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/${EnvironmentName}/*/*/*"
+      Roles:
+        - !Select [1, !Split ["/", !Ref InternalAdminRole]]
+
+  InternalReviewPolicy:
+    Type: AWS::IAM::Policy 
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-internalreview-cognito-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: execute-api:Invoke
+          Effect: Allow
+          Resource:
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/${EnvironmentName}/GET/*/*"
+      Roles:
+        - !Select [1, !Split ["/", !Ref InternalReviewRole]]
+      
+  OwnerOrgPolicy:
+    Type: AWS::IAM::Policy 
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-console-ownerorg-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: execute-api:Invoke
+          Effect: Allow
+          Resource:
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/org/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/user/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/address/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/scangroup/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/webdata/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/event/*"
+      Roles:
+        - !Select [1, !Split ["/", !Ref OwnerOrgRole]]
+
+  AdminOrgPolicy:
+    Type: AWS::IAM::Policy 
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-console-adminorg-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: execute-api:Invoke
+          Effect: Allow
+          Resource:
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/GET/org/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/user/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/address/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/scangroup/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/webdata/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/event/*"
+      Roles:
+        - !Select [1, !Split ["/", !Ref AdminOrgRole]]
+
+  AuditorOrgPolicy:
+    Type: AWS::IAM::Policy 
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-console-auditororg-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: execute-api:Invoke
+          Effect: Allow
+          Resource:
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/GET/org/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/GET/user/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/PATCH/user/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/GET/address/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/POST/address/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/GET/scangroup/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/GET/webdata/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/POST/webdata/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/event/*"
+      Roles:
+        - !Select [1, !Split ["/", !Ref AuditorOrgRole]]
+
+  EditorOrgPolicy:
+    Type: AWS::IAM::Policy 
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-console-editororg-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: execute-api:Invoke
+          Effect: Allow
+          Resource:
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/GET/org/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/event/*"
+      Roles:
+        - !Select [1, !Split ["/", !Ref EditorOrgRole]]
+
+  ReviewerOrgPolicy:
+    Type: AWS::IAM::Policy 
+    Properties:
+      PolicyName: !Sub "${EnvironmentName}-console-reviewerorg-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: execute-api:Invoke
+          Effect: Allow
+          Resource:
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/GET/org/*"
+            - !Join
+              - ''
+              - - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:"
+                - !Ref ConsoleRestApi
+                - !Sub "/${EnvironmentName}/*/event/*"
+      Roles:
+        - !Select [1, !Split ["/", !Ref ReviewerOrgRole]]
